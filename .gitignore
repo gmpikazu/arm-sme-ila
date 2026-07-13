@@ -1,1 +1,7 @@
+ILAng/
+.cache/
+.vscode/
 build/
+*.o
+*.so
+*.a
