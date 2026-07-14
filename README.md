@@ -1,11 +1,19 @@
 # Project Plan
 ## Next Steps
-- Input states for `instr` decode
+- `esize` must be baked into the opcode, cannot be runtime `ExprRef`
+    - make helper function to create same instr for .B .H .W .D .Q suffixes
+- Mov (alias), Mova, Ld, St, Ldr, Str, Zero instructions
+- Lambda `combine` operator functions (for add, sub, zero)
 ## Delayed Simple Tasks
-- `SMSSTART/STOP` zeroing behavior
-## Delayed Complex Tasks
-- Predicate masking
+- `SMSSTART/STOP` on/off zeroing behavior (B1.1.1 and E2 pseudocode of SM,ZA states)
 - `Ws+imm` slice index
+- Use asserts instead of `if` and `switch` for program guarantee
+## Delayed Complex Tasks
+- Floating point
+- Outer products and sums
+## Random Questions
+- Does ILAng use 2's complement natively for operator overloads?
+- How do I know if a comparison operator overload is signed or unsigned?
 
 # Implementation Overview
 This document is aimed to provide viewers with a overview of the lower-level implementation specifics of this project
@@ -27,3 +35,8 @@ This document is aimed to provide viewers with a overview of the lower-level imp
 **Getter and Setter for ZA Tiling:**
 - `GetElement` helper function `loads` adjacent `BYTE`s and concatenates them to form the output vector
 - `SetElement` helper function breaks the input vector into `BYTE`s and `stores` them into ZA memory byte-per-byte
+
+## Single Predicate Masking
+- ARM SME supports `/M` (merge mode), destination element is unmodified if source element is not activated by predicate bit, and `/Z` (zero mode), destination element is zeroed out instead when source element is not activated by predicate bit
+- Predicate registers contain `SVL_B` bits and `bit[i]` controls activation of `vector.elem[i]` where an element can occupy `esize` bits (eg., `BYTE`, `HALF`, etc)
+- The implementation extracts bits starting from LSB, higher order bits are ignored when we have iterated over `num_elements` bits
