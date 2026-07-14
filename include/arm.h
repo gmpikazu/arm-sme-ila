@@ -9,8 +9,9 @@ namespace arm {
     
     // TODO need to change all usage sites
     #define TEMP_DECODE BoolConst(true)
+    #define TEMP_OPCODE 0x01
     #define TEMP_BIT_WIDTH 128
-    #define TEMP_LARGEST_ADDR_WIDTH 64
+    #define TEMP_LARGEST_ADDR_WIDTH 256
 
     typedef uint64_t NumericType; // same as ilang++.h
 
@@ -46,6 +47,7 @@ class ArmSme {
     // W registers (32 bit)
     
     // NOTE Input States and Alias Names
+    ExprRef cmd; // TODO for opcode
     ExprRef ZAd; // tile_idx
     ExprRef HV; // horizontal BoolConst(false), vertical BoolConst(true)
     ExprRef Ws; // TODO 32 bit name of the base register
@@ -142,6 +144,7 @@ class ArmSme {
     
 public:
     ArmSme();
+    Ila& get() { return m; }
 };
 
 }  // namespace arm

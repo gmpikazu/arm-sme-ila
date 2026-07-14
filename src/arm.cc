@@ -9,6 +9,7 @@ namespace arm {
         pstate_za(m.NewBoolState("PSTATE_ZA")),
     
         // NOTE input states
+        cmd(m.NewBvState("cmd", TEMP_LARGEST_ADDR_WIDTH)),
         ZAd(m.NewBvState("ZAd", std::log2(SVL_B))),
         HV(m.NewBoolState("HV")),
         Ws(m.NewBvState("Ws", std::log2(32))), // TODO idk bit width
@@ -77,8 +78,7 @@ namespace arm {
     }
 
     ExprRef ArmSme::_ToMemoryAddress(const ExprRef& row, const ExprRef& col) {
-        return Extract(row * BvConst(SVL_B, ZA_ADDR_WIDTH) + col, ZA_ADDR_WIDTH-1, 0);
-        // ASK do I need to ZExt row and col to ZA_ADDR_WIDTH bits before doing arithmetic? 
+        return Extract(ZExt(row, ZA_ADDR_WIDTH) * BvConst(SVL_B, ZA_ADDR_WIDTH) + ZExt(col, ZA_ADDR_WIDTH), ZA_ADDR_WIDTH-1, 0);
     }
 
     // NOTE Topmost row is index 0
@@ -88,9 +88,9 @@ namespace arm {
         NumericType num_tiles = SVL_B / dim;
 
         // ARM SME: row_idx % dim (required by ARM)
-        ExprRef wrapped_row_idx = Extract(row_idx, static_cast<int>(std::log2(dim))-1, 0);
-        wrapped_row_idx = ZExt(wrapped_row_idx, ZA_ADDR_WIDTH);
-        ExprRef row = tile_idx + wrapped_row_idx * BvConst(num_tiles, ZA_ADDR_WIDTH);
+        // NOTE log2(dim=1) produces 0, needs separate handling
+        ExprRef wrapped_row_idx = (dim == 1) ? BvConst(0, ZA_ADDR_WIDTH) : ZExt(Extract(row_idx, static_cast<int>(std::log2(dim))-1, 0), ZA_ADDR_WIDTH);
+        ExprRef row = ZExt(tile_idx, ZA_ADDR_WIDTH) + wrapped_row_idx * BvConst(num_tiles, ZA_ADDR_WIDTH);
 
         ExprRef slice = _GetByte(_ToMemoryAddress(row, BvConst(0, ZA_ADDR_WIDTH))); // first byte
         for (size_t i = 1; i < SVL_B; i++) { // the remaining bytes
@@ -108,8 +108,8 @@ namespace arm {
         ExprRef element_size_bytes = BvConst(element_size_bits / BYTE, ZA_ADDR_WIDTH);
         
         // ARM SME: col_idx % dim (required by ARM)
-        ExprRef wrapped_col_idx = Extract(col_idx, static_cast<int>(std::log2(dim))-1, 0);
-        wrapped_col_idx = ZExt(wrapped_col_idx, ZA_ADDR_WIDTH);
+        // NOTE log2(dim=1) produces 0, needs separate handling
+        ExprRef wrapped_col_idx = (dim == 1) ? BvConst(0, ZA_ADDR_WIDTH) : ZExt(Extract(col_idx, static_cast<int>(std::log2(dim))-1, 0), ZA_ADDR_WIDTH);
         ExprRef col = (BvConst(SVL_B, ZA_ADDR_WIDTH) - element_size_bytes) - (wrapped_col_idx * element_size_bytes); // (SVL_B - element_size_bytes) gives the column index of the rightmost element, (col_idx * element_size_bytes) moves back col_idx times
         
         ExprRef slice = _GetElementAtAddress(_ToMemoryAddress(tile_idx, col), element_size_bits); // first row
@@ -117,7 +117,7 @@ namespace arm {
         // SVL / element_size_bits gives num_cols which equals num_rows (square)
         for (size_t i = 1; i < dim; i++) { // so loops all rows of this tile
             // Section B2.3.4 concat order: Topmost element is index 0
-            slice = Concat(_GetElementAtAddress(_ToMemoryAddress(tile_idx + BvConst(i * num_tiles, ZA_ADDR_WIDTH), col), element_size_bits), slice);
+            slice = Concat(_GetElementAtAddress(_ToMemoryAddress(ZExt(tile_idx, ZA_ADDR_WIDTH) + BvConst(i * num_tiles, ZA_ADDR_WIDTH), col), element_size_bits), slice);
         }
         return slice;
     }
@@ -133,9 +133,9 @@ namespace arm {
         NumericType num_tiles = SVL_B / dim;
 
         // ARM SME: row_idx % dim (required by ARM)
-        ExprRef wrapped_row_idx = Extract(row_idx, static_cast<int>(std::log2(dim))-1, 0);
-        wrapped_row_idx = ZExt(wrapped_row_idx, ZA_ADDR_WIDTH);
-        ExprRef row = tile_idx + wrapped_row_idx * BvConst(num_tiles, ZA_ADDR_WIDTH);
+        // NOTE log2(dim=1) produces 0, needs separate handling
+        ExprRef wrapped_row_idx = (dim == 1) ? BvConst(0, ZA_ADDR_WIDTH) : ZExt(Extract(row_idx, static_cast<int>(std::log2(dim))-1, 0), ZA_ADDR_WIDTH);
+        ExprRef row = ZExt(tile_idx, ZA_ADDR_WIDTH) + wrapped_row_idx * BvConst(num_tiles, ZA_ADDR_WIDTH);
 
         // accumulates new_mem = Updated(new_mem)
         ExprRef new_mem = za;
@@ -153,8 +153,8 @@ namespace arm {
         ExprRef element_size_bytes = BvConst(element_size_bits / BYTE, ZA_ADDR_WIDTH);
         
         // ARM SME: col_idx % dim (required by ARM)
-        ExprRef wrapped_col_idx = Extract(col_idx, static_cast<int>(std::log2(dim))-1, 0);
-        wrapped_col_idx = ZExt(wrapped_col_idx, ZA_ADDR_WIDTH);
+        // NOTE log2(dim=1) produces 0, needs separate handling
+        ExprRef wrapped_col_idx = (dim == 1) ? BvConst(0, ZA_ADDR_WIDTH) : ZExt(Extract(col_idx, static_cast<int>(std::log2(dim))-1, 0), ZA_ADDR_WIDTH);
         ExprRef col = (BvConst(SVL_B, ZA_ADDR_WIDTH) - element_size_bytes) - (wrapped_col_idx * element_size_bytes); // (SVL_B - element_size_bytes) gives the column index of the rightmost element, (col_idx * element_size_bytes) moves back col_idx times
         
         // accumulates new_mem = Updated(new_mem)
@@ -162,7 +162,7 @@ namespace arm {
         // SVL / element_size_bits gives num_cols which equals num_rows (square)
         for (size_t i = 1; i < dim; i++) { // so loops all rows of this tile
             // Section B2.3.4 concat order: Topmost element is index 0
-            new_mem = _SetElementAtAddress(new_mem, _ToMemoryAddress(tile_idx + BvConst(i * num_tiles, ZA_ADDR_WIDTH), col), element_size_bits, GetElementInVectorFromLSB(data, i, element_size_bits));
+            new_mem = _SetElementAtAddress(new_mem, _ToMemoryAddress(ZExt(tile_idx, ZA_ADDR_WIDTH) + BvConst(i * num_tiles, ZA_ADDR_WIDTH), col), element_size_bits, GetElementInVectorFromLSB(data, i, element_size_bits));
         }
         return new_mem;
     }
@@ -198,6 +198,11 @@ namespace arm {
     ExprRef ArmSme::SetElementInVectorFromLSB(const ExprRef& vector, const NumericType& idx, const NumericType& element_size_bits, const ExprRef& new_element, const NumericType& vector_length_bits) {
         NumericType num_elements = vector_length_bits / element_size_bits;
         if (num_elements == 0) throw std::runtime_error("SetElementInVectorFromLSB(): received no elements, possibly by integer division of input");
+
+        // NOTE edge case where left or right would be an invalid extraction
+        if (num_elements == 1) { // single element fills the entire vector
+            return new_element;
+        }
 
         NumericType rightmost_idx = idx * element_size_bits;
         if (idx == num_elements-1){ // leftmost
@@ -301,17 +306,22 @@ namespace arm {
         ExprRef SME_ON = pstate_sm & pstate_za;
         // ASK since MOV is alias to MOVA, maybe no need to implement
         { // MOVA (tile to vector)
-            {
-                InstrRef instr = m.NewInstr("MOVA_T2V.B");
-                auto decode = SME_ON & TEMP_DECODE;
+            auto f = [&](NumericType opcode, NumericType esize, std::string suffix){
+                InstrRef instr = m.NewInstr("MOVA_T2V."+suffix);
+                auto decode = SME_ON & (cmd == opcode);
                 instr.SetDecode(decode);
 
                 auto slice_idx = BaseRegPlusImm(Ws, Imm);
-                auto source = GetTypedSlice(HV, ZAd, slice_idx, BYTE);
+                auto source = GetTypedSlice(HV, ZAd, slice_idx, esize);
                 auto dest = ReadVectorRegister(Zn);
-                auto masked = MaskWithSinglePredicate(source, dest, BYTE, SVL, ReadPredicateRegister(Pn), BoolConst(false));
+                auto masked = MaskWithSinglePredicate(source, dest, esize, SVL, ReadPredicateRegister(Pn), BoolConst(false));
                 WriteVectorRegister(instr, Zn, masked);
-            }
+            };
+            f(TEMP_OPCODE, BYTE, "B");
+            f(TEMP_OPCODE, HALF, "H");
+            f(TEMP_OPCODE, WORD, "S");
+            f(TEMP_OPCODE, DOUBLE, "D");
+            f(TEMP_OPCODE, QUAD, "Q");
         }
         { // MOVA (vector to tile)
             {
@@ -319,7 +329,7 @@ namespace arm {
                 auto decode = SME_ON & TEMP_DECODE;
                 instr.SetDecode(decode);
                 
-                auto slice_idx = BaseRegPlusImm(Ws, Imm);
+                auto slice_idx = BvConst(1, ZA_ADDR_WIDTH);//BaseRegPlusImm(Ws, Imm);
                 auto source = ReadVectorRegister(Zn);
                 auto dest = GetTypedSlice(HV, ZAd, slice_idx, BYTE);
                 auto masked = MaskWithSinglePredicate(source, dest, BYTE, SVL, ReadPredicateRegister(Pn), BoolConst(false));
