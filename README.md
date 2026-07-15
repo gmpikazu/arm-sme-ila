@@ -1,13 +1,24 @@
 # Project Plan
+## Crucial Clarification (ask in meeting)
+- Untyped data type instruction how to encode and operate
+- How to model DRAM memory, because we need to agree on the memory model to prove between Gemmini and ARM SME
+    - To implement `LD`, `ST` for each data type
+- How to deal with different float types, widening, and arithmetic
+    - To implement sum, outer product, and other operations
+- Must `ZA0` single choice tile access be independent instruction? I handled it with the `if(dim==1)` check already though before doing `log2(dim)`
+- What is the length of the `Imm` field, it differs based on instruction it seems
+- How many predicate registers do we need to have?
+- `esize` is baked into opcode, and we use lambdas for .B .H .W .D .Q suffixes, right?
 ## Next Steps
-- `esize` must be baked into the opcode, cannot be runtime `ExprRef`
-    - make helper function to create same instr for .B .H .W .D .Q suffixes
+- Helper that takes two vectors and `esize`, returns a new vector that combines the two vectors using a Lambda `combine()` function: `add`, `sub`, `accumulate`
+    - For outer products, sums, accumulate, etc
+- Agreement on how to model general purpose DRAM memory for `LD`, `ST` instructions
 - Mov (alias), Mova, Ld, St, Ldr, Str, Zero instructions
-- Lambda `combine` operator functions (for add, sub, zero)
 ## Delayed Simple Tasks
 - `SMSSTART/STOP` on/off zeroing behavior (B1.1.1 and E2 pseudocode of SM,ZA states)
 - `Ws+imm` slice index
 - Use asserts instead of `if` and `switch` for program guarantee
+- `Z_REG_WIDTH` and `SVL` scattered around code but they are same thing
 ## Delayed Complex Tasks
 - Floating point
 - Outer products and sums
@@ -19,6 +30,7 @@
 This document is aimed to provide viewers with a overview of the lower-level implementation specifics of this project
 ## Code Conventions
 - Widths and sizes are given in bits (eg., `SVL`, `BYTE`, `HALF`)
+- `UpdateSingle`-prefixed functions perform `instr.SetUpdate()` internally so **does not** support updating multiple changes at once (use lower-level helpers instead)
 ## ZA Storage
 **Representation:**
 - `SVL_B`x`SVL_B` matrix represented as a linear array of `BYTE`s
