@@ -3,7 +3,7 @@
 - Untyped data type instruction how to encode and operate
 - How to model DRAM memory, because we need to agree on the memory model to prove between Gemmini and ARM SME
     - To implement `LD`, `ST` for each data type
-- How to deal with different float types, widening, and arithmetic
+- How to deal with different float types, widening, and arithmetic (signed & unsigned)
     - To implement sum, outer product, and other operations
 - Must `ZA0` single choice tile access be independent instruction? I handled it with the `if(dim==1)` check already though before doing `log2(dim)`
 - What is the length of the `Imm` field, it differs based on instruction it seems
