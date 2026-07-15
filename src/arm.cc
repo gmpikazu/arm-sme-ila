@@ -17,6 +17,34 @@ namespace arm {
         za(m.NewMemState("ZA", ZA_ADDR_WIDTH, BYTE)),
         pstate_sm(m.NewBoolState("PSTATE_SM")),
         pstate_za(m.NewBoolState("PSTATE_ZA"))
+        Opcode(m.NewBvInput("Opcode",)TEMP_BIT_WIDTH);
+        Op1(m.NewBvInput("Op1",)3);
+        Op2(m.NewBvInput("Op2",)3);
+        CRm(m.NewBvInput("CRm",)4);
+        ZAda(m.NewBvInput("ZAda",)TEMP_BIT_WIDTH);
+        ZAt(m.NewBvInput("ZAt",)TEMP_BIT_WIDTH);
+        V(m.NewBvInput("V",)1);
+        I1(m.NewBvInput("I1",)1);
+        Pm(m.NewBvInput("Pm",)TEMP_BIT_WIDTH);
+        Pn(m.NewBvInput("Pn",)TEMP_BIT_WIDTH);
+        Pd(m.NewBvInput("Pd",)TEMP_BIT_WIDTH); 
+        Zn(m.NewBvInput("Zn",)TEMP_BIT_WIDTH);
+        Zm(m.NewBvInput("Zm",)TEMP_BIT_WIDTH);
+        Zd(m.NewBvInput("Zd",)TEMP_BIT_WIDTH);
+        Rs(m.NewBvInput("Rs",)TEMP_BIT_WIDTH);
+        Rd(m.NewBvInput("Rd",)TEMP_BIT_WIDTH);
+        Rn(m.NewBvInput("Rn",)TEMP_BIT_WIDTH);
+        Rm(m.NewBvInput("Rm",)TEMP_BIT_WIDTH);
+        Rv(m.NewBvInput("Rv",)TEMP_BIT_WIDTH);
+        Imm2(m.NewBvInput("Imm2",)2);
+        Imm3(m.NewBvInput("Imm3",)3);
+        Imm4(m.NewBvInput("Imm4",)4);
+        Imm6(m.NewBvInput("Imm6",)6);
+        Imm8(m.NewBvInput("Imm8",)8);
+        Pg(m.NewBvInput("Pg",)3); // unsure if consistent
+        Tszh(m.NewBvInput("Tszh",)1);
+        Tszl(m.NewBvInput("Tszl",)3);
+        Size(m.NewBvInput("Size",)2);
     {
         // initialize vector registers of length SVL bits
         for (size_t i = 0; i <= 31; i++) {

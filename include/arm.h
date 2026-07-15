@@ -18,6 +18,8 @@ namespace arm {
     #define DOUBLE 64
     #define QUAD 128
 
+    #define TEMP_BIT_WIDTH 0 // TODO CHANGE THIS LATER
+
     constexpr NumericType SVL = 128;
     constexpr NumericType SVL_B = SVL / BYTE;
     constexpr NumericType ZA_BYTE_SIZE = SVL_B * SVL_B;
@@ -32,6 +34,49 @@ class ArmSme {
     ExprRef pstate_za;
     std::vector<ExprRef> z_regs;
     std::vector<ExprRef> p_regs;
+
+    // Input states
+
+    ExprRef Opcode;
+
+    // <pstatefield> is encoded in the following
+    ExprRef Op1;
+    ExprRef Op2;
+    ExprRef CRm;
+    
+    ExprRef ZAda;
+    ExprRef ZAt;
+
+    ExprRef V;
+    ExprRef I1;
+
+    ExprRef Pm;
+    ExprRef Pn;
+    ExprRef Pd; 
+    
+    ExprRef Zn;
+    ExprRef Zm;
+    ExprRef Zd;
+
+    ExprRef Rs;
+    ExprRef Rd;
+    ExprRef Rn;
+    ExprRef Rm;
+    ExprRef Rv;
+
+    // ExprRef Imm (not sure if actual field)
+    ExprRef Imm2;
+    ExprRef Imm3;
+    ExprRef Imm4;
+    ExprRef Imm6;
+    ExprRef Imm8;
+
+    ExprRef Pg;
+
+    // <T> is encoded in tszh and tszl or size
+    ExprRef Tszh;
+    ExprRef Tszl;
+    ExprRef Size;
 
     void AddInstructions();
 
