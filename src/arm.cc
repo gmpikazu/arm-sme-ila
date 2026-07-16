@@ -17,33 +17,35 @@ namespace arm {
         XZR(BvConst(0, 64)),
         WZR(BvConst(0, 32)),
 
-        cmd(m.NewBvState("cmd", TEMP_LARGEST_ADDR_WIDTH)), // TODO TBC
+        // NOTE input states
+        cmd(m.NewBvInput("cmd", TEMP_LARGEST_ADDR_WIDTH)), // TODO TBC
 
-        ZAda(m.NewBvState("ZAda", std::log2(SVL_B))),
-        ZAn(m.NewBvState("ZAn", std::log2(SVL_B))),
-        ZAd(m.NewBvState("ZAd", std::log2(SVL_B))),
-        ZAt(m.NewBvState("ZAt", std::log2(SVL_B))),
-        HV(m.NewBoolState("HV")),
+        ZAda(m.NewBvInput("ZAda", LOG2_SVL_B)),
+        ZAn(m.NewBvInput("ZAn", LOG2_SVL_B)),
+        ZAd(m.NewBvInput("ZAd", LOG2_SVL_B)),
+        ZAt(m.NewBvInput("ZAt", LOG2_SVL_B)),
+        HV(m.NewBoolInput("HV")),
 
-        Rs(m.NewBvState("Rs", std::log2(32))),
-        Rv(m.NewBvState("Rv", std::log2(32))),
-        Rn(m.NewBvState("Rn", std::log2(64))),
-        Rm(m.NewBvState("Rm", std::log2(64))),
-        Rd(m.NewBvState("Rd", std::log2(64))),
+        // TODO TBC: check each bit width
+        Rs(m.NewBvInput("Rs", GPR_ADDR_WIDTH)),
+        Rv(m.NewBvInput("Rv", GPR_ADDR_WIDTH)),
+        Rn(m.NewBvInput("Rn", GPR_ADDR_WIDTH)),
+        Rm(m.NewBvInput("Rm", GPR_ADDR_WIDTH)),
+        Rd(m.NewBvInput("Rd", GPR_ADDR_WIDTH)),
         
-        Imm(m.NewBvState("Imm", 8)), // TODO TBC: what is the maximum bits needed?
+        Imm(m.NewBvInput("Imm", 8)), // TODO TBC: what is the maximum bits needed?
         Imm1(Imm(1, 0)), Imm2((Imm(2, 0))),
         Imm3(Imm(3, 0)), Imm4(Imm(4, 0)),
         Imm6(Imm(6, 0)), Imm8(Imm(8, 0)),
 
-        Pg(m.NewBvState("Pg", P_ADDR_WIDTH)),
-        Pd(m.NewBvState("Pd", P_ADDR_WIDTH)),
-        Pn(m.NewBvState("Pn", P_ADDR_WIDTH)),
-        Pm(m.NewBvState("Pm", P_ADDR_WIDTH)),
+        Pg(m.NewBvInput("Pg", P_ADDR_WIDTH)),
+        Pd(m.NewBvInput("Pd", P_ADDR_WIDTH)),
+        Pn(m.NewBvInput("Pn", P_ADDR_WIDTH)),
+        Pm(m.NewBvInput("Pm", P_ADDR_WIDTH)),
 
-        Zd(m.NewBvState("Zd", Z_ADDR_WIDTH)),
-        Zn(m.NewBvState("Zn", Z_ADDR_WIDTH)),
-        Zm(m.NewBvState("Zm", Z_ADDR_WIDTH))
+        Zd(m.NewBvInput("Zd", Z_ADDR_WIDTH)),
+        Zn(m.NewBvInput("Zn", Z_ADDR_WIDTH)),
+        Zm(m.NewBvInput("Zm", Z_ADDR_WIDTH))
     {
         assert(Z_REG_WIDTH == SVL);
 
@@ -63,7 +65,7 @@ namespace arm {
         AddInstructions();
     }
     
-    ExprRef ToConstrainedTileIndex(const ExprRef& tile_idx, const NumericType& esize) {
+    ExprRef ArmSme::ToConstrainedTileIndex(const ExprRef& tile_idx, const NumericType& esize) {
         if (esize == BYTE) return BvConst(1, 1); // edge case: log2(1)=0 fails
         // (1): dim = SVL / esize
         // (2): num_tiles = SVL_B / dim
@@ -268,62 +270,70 @@ namespace arm {
     }
 
     ExprRef ArmSme::GetVectorRegister(const ExprRef& z_idx) {
+        assert(z_idx.bit_width() <= Z_ADDR_WIDTH);
         ExprRef expr = z_regs[0];
         for (size_t i = 1; i < Z_REG_COUNT; i++){
-            expr = Ite(z_idx == BvConst(i, Z_ADDR_WIDTH), z_regs[i], expr);
+            expr = Ite(z_idx == i, z_regs[i], expr);
         }
         return expr;
     }
     
     ExprRef ArmSme::GetPredicateRegister(const ExprRef& p_idx) {
+        assert(p_idx.bit_width() <= P_ADDR_WIDTH);
         ExprRef expr = p_regs[0];
         for (size_t i = 1; i < P_REG_COUNT; i++){
-            expr = Ite(p_idx == BvConst(i, P_ADDR_WIDTH), p_regs[i], expr);
+            expr = Ite(p_idx == i, p_regs[i], expr);
         }
         return expr;
     }
     
     void ArmSme::UpdateSingleVectorRegister(InstrRef& instr, const ExprRef& z_idx, const ExprRef& val) {
         if (val.bit_width() != Z_REG_WIDTH) throw std::runtime_error("UpdateSingleVectorRegister(): val's bit-width must match Z_REG_WIDTH");
+        assert(z_idx.bit_width() <= Z_ADDR_WIDTH);
         for (size_t i = 0; i < Z_REG_COUNT; i++){
-            instr.SetUpdate(z_regs[i], Ite(z_idx == BvConst(i, Z_ADDR_WIDTH), val, z_regs[i]));
+            instr.SetUpdate(z_regs[i], Ite(z_idx == i, val, z_regs[i]));
         }
     }
     
     void ArmSme::UpdateSinglePredicateRegister(InstrRef& instr, const ExprRef& p_idx, const ExprRef& val) {
         if (val.bit_width() != P_REG_WIDTH) throw std::runtime_error("UpdateSinglePredicateRegister(): val's bit-width must match P_REG_WIDTH");
+        assert(p_idx.bit_width() <= P_ADDR_WIDTH);
         for (size_t i = 0; i < P_REG_COUNT; i++){
-            instr.SetUpdate(p_regs[i], Ite(p_idx == BvConst(i, P_ADDR_WIDTH), val, p_regs[i]));
+            instr.SetUpdate(p_regs[i], Ite(p_idx == i, val, p_regs[i]));
         }
     }
 
     ExprRef ArmSme::Get32BitGPR(const ExprRef& w_idx){
+        assert(w_idx.bit_width() <= GPR_ADDR_WIDTH);
         ExprRef expr = Extract(GPRs[0], 31, 0);
         for (size_t i = 1; i < GPR_COUNT; i++){
-            expr = Ite(w_idx == BvConst(i, GPR_ADDR_WIDTH), Extract(GPRs[i], 31, 0), expr);
+            expr = Ite(w_idx == i, Extract(GPRs[i], 31, 0), expr);
         }
         return expr;
     }
 
     ExprRef ArmSme::Get64BitGPR(const ExprRef& x_idx){
+        assert(x_idx.bit_width() <= GPR_ADDR_WIDTH);
         ExprRef expr = GPRs[0];
         for (size_t i = 1; i < GPR_COUNT; i++){
-            expr = Ite(x_idx == BvConst(i, GPR_ADDR_WIDTH), GPRs[i], expr);
+            expr = Ite(x_idx == i, GPRs[i], expr);
         }
         return expr;
     }
 
     void ArmSme::UpdateSingle32BitGPR(InstrRef& instr, const ExprRef& w_idx, const ExprRef& val){
         if (val.bit_width() != 32) throw std::runtime_error("UpdateSingle32BitGPR(): val's bit-width must be 32 bits");
+        assert(w_idx.bit_width() <= GPR_ADDR_WIDTH);
         for (size_t i = 0; i < GPR_COUNT; i++){
-            instr.SetUpdate(GPRs[i], Ite(w_idx == BvConst(i, GPR_ADDR_WIDTH), ZExt(val, 64), GPRs[i]));
+            instr.SetUpdate(GPRs[i], Ite(w_idx == i, ZExt(val, 64), GPRs[i]));
         }
     }
 
     void ArmSme::UpdateSingle64BitGPR(InstrRef& instr, const ExprRef& x_idx, const ExprRef& val){
         if (val.bit_width() != 64) throw std::runtime_error("UpdateSingle64BitGPR(): val's bit-width must be 64 bits");
+        assert(x_idx.bit_width() <= GPR_ADDR_WIDTH);
         for (size_t i = 0; i < GPR_COUNT; i++){
-            instr.SetUpdate(GPRs[i], Ite(x_idx == BvConst(i, GPR_ADDR_WIDTH), val, GPRs[i]));
+            instr.SetUpdate(GPRs[i], Ite(x_idx == i, val, GPRs[i]));
         }
     }
     
@@ -348,91 +358,6 @@ namespace arm {
             result = SetElementInVectorFromLSB(result, i, element_size_bits, new_element, vector_length_bits);
         }
         return result;
-    }
-    
-    // NOTE esize is BUILT-INTO the instruction using .B .H .W .D .Q suffixes
-    void ArmSme::AddInstructions() {
-        { // SMSTART
-            InstrRef instr = m.NewInstr("SMSTART");
-            auto decode = TEMP_DECODE;
-            instr.SetDecode(decode);
-            instr.SetUpdate(pstate_sm, BoolConst(true));
-            instr.SetUpdate(pstate_za, BoolConst(true));
-            // TODO zero out vector and predicate registers
-        }
-        { // SMSTOP
-            InstrRef instr = m.NewInstr("SMSTOP");
-            auto decode = TEMP_DECODE;
-            instr.SetDecode(decode);
-            instr.SetUpdate(pstate_sm, BoolConst(false));
-            instr.SetUpdate(pstate_za, BoolConst(false));
-            // TODO zero out vector and predicate registers
-            // TODO changing pstate_ZA may zero out the ZA storage (read B1.1.1.2 PSTATE.ZA)
-        }
-        
-        // NOTE instructions below requires Streaming SVE mode
-        ExprRef SME_ON = pstate_sm & pstate_za;
-        #define constrained(tile_idx, esize) ToConstrainedTileIndex(tile_idx, esize)
-        
-        // ASK since MOV is alias to MOVA, maybe no need to implement
-        { // MOVA (tile to vector)
-            auto f = [&](NumericType opcode, NumericType esize, std::string suffix, ExprRef tile_idx, ExprRef imm){
-                InstrRef instr = m.NewInstr("MOVA_T2V"+suffix);
-                auto decode = SME_ON & (cmd == opcode);
-                instr.SetDecode(decode);
-
-                auto slice_idx = BaseRegPlusImm(Get32BitGPR(Rs), imm);
-                // TODO what to do with ZAn, different for each bit width
-                auto source = GetTypedSlice(za, HV, tile_idx, slice_idx, esize);
-                auto dest = GetVectorRegister(Zd);
-                auto masked = MaskWithSinglePredicate(source, dest, esize, SVL, GetPredicateRegister(Pg), BoolConst(false));
-                UpdateSingleVectorRegister(instr, Zn, masked);
-            };
-            f(TEMP_OPCODE, BYTE, ".B", constrained(ZAn, BYTE), Imm4);
-            f(TEMP_OPCODE, HALF, ".H", constrained(ZAn, HALF), Imm3);
-            f(TEMP_OPCODE, WORD, ".S", constrained(ZAn, WORD), Imm2);
-            f(TEMP_OPCODE, DOUBLE, ".D", constrained(ZAn, DOUBLE), Imm1);
-            f(TEMP_OPCODE, QUAD, ".Q", constrained(ZAn, QUAD), BvConst(0, 1));
-        }
-        { // MOVA (vector to tile)
-            auto f = [&](NumericType opcode, NumericType esize, std::string suffix, ExprRef tile_idx, ExprRef imm){
-                InstrRef instr = m.NewInstr("MOVA_V2T"+suffix);
-                auto decode = SME_ON & (cmd == opcode);
-                instr.SetDecode(decode);
-                
-                auto slice_idx = BaseRegPlusImm(Get32BitGPR(Rs), imm);
-                auto source = GetVectorRegister(Zn);
-                auto dest = GetTypedSlice(za, HV, tile_idx, slice_idx, BYTE);
-                auto masked = MaskWithSinglePredicate(source, dest, BYTE, SVL, GetPredicateRegister(Pn), BoolConst(false));
-                UpdateSingleTypedSlice(instr, HV, tile_idx, slice_idx, BYTE, masked);
-            };
-            f(TEMP_OPCODE, BYTE, ".B", constrained(ZAd, BYTE), Imm4);
-            f(TEMP_OPCODE, HALF, ".H", constrained(ZAd, HALF), Imm3);
-            f(TEMP_OPCODE, WORD, ".S", constrained(ZAd, WORD), Imm2);
-            f(TEMP_OPCODE, DOUBLE, ".D", constrained(ZAd, DOUBLE), Imm1);
-            f(TEMP_OPCODE, QUAD, ".Q", constrained(ZAd, QUAD), BvConst(0, 1));
-        }
-        { // ZERO
-            InstrRef instr = m.NewInstr("ZERO");
-            auto decode = SME_ON & TEMP_DECODE;
-            instr.SetDecode(decode);
-
-            // NOTE instruction only operates on 64-bit tiles (8 tiles total)
-            NumericType esize = DOUBLE; 
-            ExprRef new_za = za;
-            for (size_t tile_idx = 0; tile_idx < 8; tile_idx++){
-                // ASK is it really from LSB?
-                ExprRef activated = (GetBitFromLSB(Imm8, tile_idx) != 0);
-                ExprRef zeroed_tile_za = new_za;
-                // construct new ZA expr where tile[tile_idx] is zeroed out
-                for (size_t row_idx = 0; row_idx < 8; row_idx++){
-                    zeroed_tile_za = _SetTypedHorizontalSlice(zeroed_tile_za, BvConst(row_idx, ZA_ADDR_WIDTH), BvConst(tile_idx, ZA_ADDR_WIDTH), esize, BvConst(0, SVL)); // convert hardcoded row_idx, tile_idx to ExprRef
-                }
-                // only apply zeroing if tile bit is activated
-                new_za = Ite(activated, zeroed_tile_za, new_za);
-            }
-            instr.SetUpdate(za, new_za);
-        }
     }
 
 }  // namespace arm

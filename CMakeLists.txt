@@ -5,6 +5,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE INTERNAL "")
 
 add_subdirectory(ILAng)
 
-add_executable(main src/main.cc src/arm.cc)
+add_executable(main src/main.cc src/arm.cc src/instr.cc)
 target_include_directories(main PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(main PRIVATE ilang::ilang)

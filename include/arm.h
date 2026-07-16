@@ -23,8 +23,9 @@ namespace arm {
 
     constexpr NumericType SVL = 128;
     constexpr NumericType SVL_B = SVL / BYTE;
+    const NumericType LOG2_SVL_B = std::log2(SVL_B);
     constexpr NumericType GPR_COUNT = 31;
-    const NumericType GPR_ADDR_WIDTH = std::log2(GPR_COUNT);
+    const NumericType GPR_ADDR_WIDTH = std::ceil(std::log2(GPR_COUNT));
     constexpr NumericType ZA_BYTE_SIZE = SVL_B * SVL_B;
     const NumericType ZA_ADDR_WIDTH = std::log2(ZA_BYTE_SIZE);
     constexpr NumericType Z_REG_COUNT = 32;
@@ -84,10 +85,10 @@ class ArmSme {
     ExprRef HV; // horizontal BoolConst(false), vertical BoolConst(true)
 
     // GPR Names
-    ExprRef Rs; // 32-bit name of W register (32 lower bits of X register)
-    ExprRef Rv; // 32-bit name of W register (32 lower bits of X register)
-    ExprRef Rn; // 64-bit name of X register
-    ExprRef Rm; // 64-bit name of X register
+    ExprRef Rs; // 32-bit W register (32 lower bits of X register)
+    ExprRef Rv; // 32-bit W register (32 lower bits of X register)
+    ExprRef Rn; // 64-bit X register
+    ExprRef Rm; // 64-bit X register
     ExprRef Rd; // 64-bit destination register
     
     // Immediates (signed or unsigned depends on instruction interpretation)
