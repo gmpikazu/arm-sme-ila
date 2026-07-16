@@ -197,8 +197,8 @@ class ArmSme {
     // NOTE return value and write value must be 32-bit or 64-bit respectively
     ExprRef Get32BitGPR(const ExprRef& w_idx); // for W register access
     ExprRef Get64BitGPR(const ExprRef& x_idx); // for X register access
-    ExprRef UpdateSingle32BitGPR(InstrRef& instr, const ExprRef& w_idx, const ExprRef& val); // perform zero extension before writing to the whole 64-bit X register
-    ExprRef UpdateSingle64BitGPR(InstrRef& instr, const ExprRef& x_idx, const ExprRef& val);
+    void UpdateSingle32BitGPR(InstrRef& instr, const ExprRef& w_idx, const ExprRef& val); // perform zero extension before writing to the whole 64-bit X register
+    void UpdateSingle64BitGPR(InstrRef& instr, const ExprRef& x_idx, const ExprRef& val);
     
     // TODO make BaseRegPlusImm(Ws, imm) and returns (Ws+imm), passed into our current helpers that does modulo internally (imm range must be constrained depending on the specific instruction too)
     ExprRef BaseRegPlusImm(const ExprRef& base_reg, const ExprRef& imm);

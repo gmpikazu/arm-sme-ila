@@ -284,16 +284,46 @@ namespace arm {
     }
     
     void ArmSme::UpdateSingleVectorRegister(InstrRef& instr, const ExprRef& z_idx, const ExprRef& val) {
-        if (val.bit_width() != Z_REG_WIDTH) throw std::runtime_error("WriteVectorRegister(): val's bit-width must match Z_REG_WIDTH");
+        if (val.bit_width() != Z_REG_WIDTH) throw std::runtime_error("UpdateSingleVectorRegister(): val's bit-width must match Z_REG_WIDTH");
         for (size_t i = 0; i < Z_REG_COUNT; i++){
             instr.SetUpdate(z_regs[i], Ite(z_idx == BvConst(i, Z_ADDR_WIDTH), val, z_regs[i]));
         }
     }
     
     void ArmSme::UpdateSinglePredicateRegister(InstrRef& instr, const ExprRef& p_idx, const ExprRef& val) {
-        if (val.bit_width() != P_REG_WIDTH) throw std::runtime_error("WritePredicateRegister(): val's bit-width must match P_REG_WIDTH");
+        if (val.bit_width() != P_REG_WIDTH) throw std::runtime_error("UpdateSinglePredicateRegister(): val's bit-width must match P_REG_WIDTH");
         for (size_t i = 0; i < P_REG_COUNT; i++){
             instr.SetUpdate(p_regs[i], Ite(p_idx == BvConst(i, P_ADDR_WIDTH), val, p_regs[i]));
+        }
+    }
+
+    ExprRef ArmSme::Get32BitGPR(const ExprRef& w_idx){
+        ExprRef expr = Extract(GPRs[0], 31, 0);
+        for (size_t i = 1; i < GPR_COUNT; i++){
+            expr = Ite(w_idx == BvConst(i, GPR_ADDR_WIDTH), Extract(GPRs[i], 31, 0), expr);
+        }
+        return expr;
+    }
+
+    ExprRef ArmSme::Get64BitGPR(const ExprRef& x_idx){
+        ExprRef expr = GPRs[0];
+        for (size_t i = 1; i < GPR_COUNT; i++){
+            expr = Ite(x_idx == BvConst(i, GPR_ADDR_WIDTH), GPRs[i], expr);
+        }
+        return expr;
+    }
+
+    void ArmSme::UpdateSingle32BitGPR(InstrRef& instr, const ExprRef& w_idx, const ExprRef& val){
+        if (val.bit_width() != 32) throw std::runtime_error("UpdateSingle32BitGPR(): val's bit-width must be 32 bits");
+        for (size_t i = 0; i < GPR_COUNT; i++){
+            instr.SetUpdate(GPRs[i], Ite(w_idx == BvConst(i, GPR_ADDR_WIDTH), ZExt(val, 64), GPRs[i]));
+        }
+    }
+
+    void ArmSme::UpdateSingle64BitGPR(InstrRef& instr, const ExprRef& x_idx, const ExprRef& val){
+        if (val.bit_width() != 64) throw std::runtime_error("UpdateSingle64BitGPR(): val's bit-width must be 64 bits");
+        for (size_t i = 0; i < GPR_COUNT; i++){
+            instr.SetUpdate(GPRs[i], Ite(x_idx == BvConst(i, GPR_ADDR_WIDTH), val, GPRs[i]));
         }
     }
     
