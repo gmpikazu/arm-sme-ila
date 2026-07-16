@@ -2,6 +2,10 @@
 
 namespace arm {
 
+    void ArmSme::InitUninterpretedFunctions(){
+        // BUG continue
+    }
+    
     // NOTE esize is BUILT-INTO the instruction using .B .H .W .D .Q suffixes
     void ArmSme::AddInstructions() {
         { // SMSTART
@@ -84,6 +88,38 @@ namespace arm {
                 new_za = Ite(activated, zeroed_tile_za, new_za);
             }
             instr.SetUpdate(za, new_za);
+        }
+        { // ADDHA
+            auto add_fn = [](ExprRef a, ExprRef b) { return a + b; };
+            auto f = [&](NumericType opcode, NumericType esize, std::string suffix, ExprRef tile_idx){
+                InstrRef instr = m.NewInstr("ADDHA"+suffix);
+                auto decode = SME_ON & (cmd == opcode);
+                instr.SetDecode(decode);
+                
+                auto row_pred = GetPredicateRegister(Pn);
+                auto col_pred = GetPredicateRegister(Pm);
+                auto vec = GetVectorRegister(Zn);
+                auto new_za = CombineTileWithHorizontalVector(za, tile_idx, vec, row_pred, col_pred, esize, BoolConst(false), add_fn);
+                instr.SetUpdate(za, new_za);
+            };
+            f(TEMP_OPCODE, WORD, ".S", constrained(ZAda, WORD));
+            f(TEMP_OPCODE, DOUBLE, ".D", constrained(ZAda, DOUBLE));
+        }
+        { // ADDVA
+            auto add_fn = [](ExprRef a, ExprRef b) { return a + b; };
+            auto f = [&](NumericType opcode, NumericType esize, std::string suffix, ExprRef tile_idx){
+                InstrRef instr = m.NewInstr("ADDVA"+suffix);
+                auto decode = SME_ON & (cmd == opcode);
+                instr.SetDecode(decode);
+                
+                auto row_pred = GetPredicateRegister(Pn);
+                auto col_pred = GetPredicateRegister(Pm);
+                auto vec = GetVectorRegister(Zn);
+                auto new_za = CombineTileWithVerticalVector(za, tile_idx, vec, row_pred, col_pred, esize, BoolConst(false), add_fn);
+                instr.SetUpdate(za, new_za);
+            };
+            f(TEMP_OPCODE, WORD, ".S", constrained(ZAda, WORD));
+            f(TEMP_OPCODE, DOUBLE, ".D", constrained(ZAda, DOUBLE));
         }
     }
     

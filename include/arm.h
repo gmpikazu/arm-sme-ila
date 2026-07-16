@@ -36,7 +36,7 @@ namespace arm {
     // ASK are they indexed from LSB or MSB?
     const NumericType P_ADDR_WIDTH = std::log2(P_REG_COUNT);
     const NumericType P_REG_WIDTH = SVL_B;
-    
+
 using namespace ilang;
 
 class ArmSme {    
@@ -118,7 +118,11 @@ class ArmSme {
     // NOTE convert tile_idx into constrained range: 0 to num_tiles-1
     ExprRef ToConstrainedTileIndex(const ExprRef& tile_idx, const NumericType& esize);
     
-    // TODO should've made GetAtRowCol() that uses _ToMemoryAddress() internally
+    // NOTE very low-level, does not scale according to element_size_bits
+    // @return ZA byte memory linear address
+    // param[in] row, col must be ZA_ADDR_WIDTH-wide
+    ExprRef _ToByteMemoryAddress(const ExprRef& row, const ExprRef& col);
+    
     // @brief Load single element from memory
     // @param[in] mem the memory state to read from
     // @param[in] addr must be aligned to BYTE, HALF, WORD, DOUBLE, QUAD
@@ -127,9 +131,10 @@ class ArmSme {
     ExprRef _GetWord(const ExprRef& mem, const ExprRef& addr);
     ExprRef _GetDouble(const ExprRef& mem, const ExprRef& addr);
     ExprRef _GetQuad(const ExprRef& mem, const ExprRef& addr);
-    ExprRef _GetElementAtAddress(const ExprRef& mem, const ExprRef& addr, const NumericType& element_size_bits);
+    ExprRef GetElementAtAddress(const ExprRef& mem, const ExprRef& addr, const NumericType& element_size_bits);
+    // TODO should've made GetAtRowCol() that uses _ToMemoryAddress() internally
+    ExprRef GetElementAtRowCol(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& row, const ExprRef& col, const NumericType& element_size_bits);
     
-    // TODO should've made SetAtRowCol() that uses _ToMemoryAddress() internally
     // @brief Store single element to ZA memory (does NOT store a whole vector)
     // @param[in] addr must be aligned to BYTE, HALF, WORD, DOUBLE, QUAD
     // @return New memory state
@@ -138,11 +143,9 @@ class ArmSme {
     ExprRef _SetWord(const ExprRef& mem, const ExprRef& addr, const ExprRef& data);
     ExprRef _SetDouble(const ExprRef& mem, const ExprRef& addr, const ExprRef& data);
     ExprRef _SetQuad(const ExprRef& mem, const ExprRef& addr, const ExprRef& data);
-    ExprRef _SetElementAtAddress(const ExprRef& mem, const ExprRef& addr, const NumericType&element_size_bits, const ExprRef& data);
-
-    // @return ZA memory linear address
-    // param[in] row, col must be ZA_ADDR_WIDTH-wide
-    ExprRef _ToMemoryAddress(const ExprRef& row, const ExprRef& col);
+    ExprRef SetElementAtAddress(const ExprRef& mem, const ExprRef& addr, const NumericType&element_size_bits, const ExprRef& data);
+    // TODO should've made SetAtRowCol() that uses _ToMemoryAddress() internally
+    ExprRef SetElementAtRowCol(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& row, const ExprRef& col, const NumericType& element_size_bits, const ExprRef& data);
 
     // @brief will be called by more sophisticated ZA access methods
     // @return Concatenated bytes into a single slice
@@ -167,7 +170,7 @@ class ArmSme {
     // NOTE ZA[N] equivalent to ZA0.B[N] but without Byte element interpretation
     // @param[in] is_vertical takes BoolConst(true) or BoolConst(false)
     // ASK bool or BoolConst?
-    // BUG InstrUpdateRegister and InstrUpdateSlice should also have those that support updating an array of registers
+    // TODO InstrUpdateRegister and InstrUpdateSlice should also have those that support updating an array of registers
     void UpdateSingleTypedSlice(InstrRef& instr, const ExprRef& is_vertical, const ExprRef& tile_idx, const ExprRef& slice_idx, const NumericType& element_size_bits, const ExprRef& data);
     // TODO In SME instructions the tile slice is selected by the sum of a 32-bit general-purpose register (slice index register Ws) and an immediate, modulo the number of slices in the named tile.
     
@@ -194,7 +197,7 @@ class ArmSme {
     // NOTE make sure val's bit-width matches the target register
     void UpdateSingleVectorRegister(InstrRef& instr, const ExprRef& z_idx, const ExprRef& val);
     void UpdateSinglePredicateRegister(InstrRef& instr, const ExprRef& p_idx, const ExprRef& val);
-    // BUG continue these
+    
     // NOTE return value and write value must be 32-bit or 64-bit respectively
     ExprRef Get32BitGPR(const ExprRef& w_idx); // for W register access
     ExprRef Get64BitGPR(const ExprRef& x_idx); // for X register access
@@ -212,8 +215,11 @@ class ArmSme {
     // - BoolConst(false) source element inactive => destination element unmodified
     // ASK bool or BoolConst?
     ExprRef MaskWithSinglePredicate(const ExprRef& source, const ExprRef& dest, const NumericType& element_size_bits, const NumericType& vector_length_bits, const ExprRef& predicate, const ExprRef& is_zero_mode=BoolConst(false));
-    
-public:
+
+    ExprRef CombineTileWithHorizontalVector(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, const ExprRef& is_zero_mode, std::function<ExprRef(ExprRef old, ExprRef extra)> combine_fn);
+    ExprRef CombineTileWithVerticalVector(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, const ExprRef& is_zero_mode, std::function<ExprRef(ExprRef old, ExprRef extra)> combine_fn);
+
+  public:
     ArmSme();
     Ila& get() { return m; }
 };

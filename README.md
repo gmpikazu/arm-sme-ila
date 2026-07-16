@@ -21,6 +21,7 @@
 - `SMSSTART/STOP` on/off zeroing behavior (B1.1.1 and E2 pseudocode of SM,ZA states)
 - `Ws+imm` slice index
 - Use asserts instead of `if` and `switch` for program guarantee
+- Remove `merge` and `zero` mode `ExprRef` selection if Z3 takes too long
 - `Z_REG_WIDTH` and `SVL` scattered around code but they are same thing
 ## Delayed Complex Tasks
 - Floating point

@@ -62,6 +62,7 @@ namespace arm {
             GPRs.push_back(m.NewBvState("x"+std::to_string(i), 64));
         }
 
+        InitUninterpretedFunctions();
         AddInstructions();
     }
     
@@ -89,7 +90,7 @@ namespace arm {
     ExprRef ArmSme::_GetQuad(const ExprRef& mem, const ExprRef& addr) { 
         return Concat(_GetDouble(mem, addr), _GetDouble(mem, addr + BvConst(8, ZA_ADDR_WIDTH)));
     }
-    ExprRef ArmSme::_GetElementAtAddress(const ExprRef& mem, const ExprRef& addr, const NumericType& element_size_bits) {
+    ExprRef ArmSme::GetElementAtAddress(const ExprRef& mem, const ExprRef& addr, const NumericType& element_size_bits) {
         switch (element_size_bits) {
             case BYTE: return _GetByte(mem, addr);
             case HALF: return _GetHalf(mem, addr);
@@ -103,7 +104,7 @@ namespace arm {
     ExprRef ArmSme::_SetByte(const ExprRef& mem, const ExprRef& addr, const ExprRef& data) {
         return Store(mem, Extract(addr, ZA_ADDR_WIDTH-1, 0), Extract(data, BYTE-1, 0));
     }
-    ExprRef ArmSme::_SetElementAtAddress(const ExprRef& mem, const ExprRef& addr, const NumericType& element_size_bits, const ExprRef& data) {
+    ExprRef ArmSme::SetElementAtAddress(const ExprRef& mem, const ExprRef& addr, const NumericType& element_size_bits, const ExprRef& data) {
         switch (element_size_bits) {
             case BYTE: case HALF: case WORD: case DOUBLE: case QUAD: break;
             default: throw std::runtime_error("_SetElement(): invalid element size_bits");
@@ -117,7 +118,7 @@ namespace arm {
         return new_mem;
     }
 
-    ExprRef ArmSme::_ToMemoryAddress(const ExprRef& row, const ExprRef& col) {
+    ExprRef ArmSme::_ToByteMemoryAddress(const ExprRef& row, const ExprRef& col) {
         return Extract(ZExt(row, ZA_ADDR_WIDTH) * BvConst(SVL_B, ZA_ADDR_WIDTH) + ZExt(col, ZA_ADDR_WIDTH), ZA_ADDR_WIDTH-1, 0);
     }
 
@@ -132,10 +133,10 @@ namespace arm {
         ExprRef wrapped_row_idx = (dim == 1) ? BvConst(0, ZA_ADDR_WIDTH) : ZExt(Extract(row_idx, static_cast<int>(std::log2(dim))-1, 0), ZA_ADDR_WIDTH);
         ExprRef row = ZExt(tile_idx, ZA_ADDR_WIDTH) + wrapped_row_idx * BvConst(num_tiles, ZA_ADDR_WIDTH);
 
-        ExprRef slice = _GetByte(mem, _ToMemoryAddress(row, BvConst(0, ZA_ADDR_WIDTH))); // first byte
+        ExprRef slice = _GetByte(mem, _ToByteMemoryAddress(row, BvConst(0, ZA_ADDR_WIDTH))); // first byte
         for (size_t i = 1; i < SVL_B; i++) { // the remaining bytes
             // Section B2.3.3 concat order: Rigtmost element is index 0
-            slice = Concat(slice , _GetByte(mem, _ToMemoryAddress(row, BvConst(i, ZA_ADDR_WIDTH))));
+            slice = Concat(slice , _GetByte(mem, _ToByteMemoryAddress(row, BvConst(i, ZA_ADDR_WIDTH))));
         }
         return slice;
     }
@@ -152,12 +153,12 @@ namespace arm {
         ExprRef wrapped_col_idx = (dim == 1) ? BvConst(0, ZA_ADDR_WIDTH) : ZExt(Extract(col_idx, static_cast<int>(std::log2(dim))-1, 0), ZA_ADDR_WIDTH);
         ExprRef col = (BvConst(SVL_B, ZA_ADDR_WIDTH) - element_size_bytes) - (wrapped_col_idx * element_size_bytes); // (SVL_B - element_size_bytes) gives the column index of the rightmost element, (col_idx * element_size_bytes) moves back col_idx times
         
-        ExprRef slice = _GetElementAtAddress(mem, _ToMemoryAddress(tile_idx, col), element_size_bits); // first row
+        ExprRef slice = GetElementAtAddress(mem, _ToByteMemoryAddress(tile_idx, col), element_size_bits); // first row
 
         // SVL / element_size_bits gives num_cols which equals num_rows (square)
         for (size_t i = 1; i < dim; i++) { // so loops all rows of this tile
             // Section B2.3.4 concat order: Topmost element is index 0
-            slice = Concat(_GetElementAtAddress(mem, _ToMemoryAddress(ZExt(tile_idx, ZA_ADDR_WIDTH) + BvConst(i * num_tiles, ZA_ADDR_WIDTH), col), element_size_bits), slice);
+            slice = Concat(GetElementAtAddress(mem, _ToByteMemoryAddress(ZExt(tile_idx, ZA_ADDR_WIDTH) + BvConst(i * num_tiles, ZA_ADDR_WIDTH), col), element_size_bits), slice);
         }
         return slice;
     }
@@ -180,7 +181,7 @@ namespace arm {
         // accumulates new_mem = Updated(new_mem)
         ExprRef new_mem = mem;
         for (size_t i = 0; i < SVL_B; i++){
-            new_mem = _SetByte(new_mem, _ToMemoryAddress(row, BvConst(i, ZA_ADDR_WIDTH)), GetElementInVectorFromMSB(data, i, BYTE, Z_REG_WIDTH));
+            new_mem = _SetByte(new_mem, _ToByteMemoryAddress(row, BvConst(i, ZA_ADDR_WIDTH)), GetElementInVectorFromMSB(data, i, BYTE, Z_REG_WIDTH));
         }
         return new_mem;
     }
@@ -198,11 +199,11 @@ namespace arm {
         ExprRef col = (BvConst(SVL_B, ZA_ADDR_WIDTH) - element_size_bytes) - (wrapped_col_idx * element_size_bytes); // (SVL_B - element_size_bytes) gives the column index of the rightmost element, (col_idx * element_size_bytes) moves back col_idx times
         
         // accumulates new_mem = Updated(new_mem)
-        ExprRef new_mem = _SetElementAtAddress(mem, _ToMemoryAddress(tile_idx, col), element_size_bits, GetElementInVectorFromLSB(data, 0, element_size_bits)); // first row
+        ExprRef new_mem = SetElementAtAddress(mem, _ToByteMemoryAddress(tile_idx, col), element_size_bits, GetElementInVectorFromLSB(data, 0, element_size_bits)); // first row
         // SVL / element_size_bits gives num_cols which equals num_rows (square)
         for (size_t i = 1; i < dim; i++) { // so loops all rows of this tile
             // Section B2.3.4 concat order: Topmost element is index 0
-            new_mem = _SetElementAtAddress(new_mem, _ToMemoryAddress(ZExt(tile_idx, ZA_ADDR_WIDTH) + BvConst(i * num_tiles, ZA_ADDR_WIDTH), col), element_size_bits, GetElementInVectorFromLSB(data, i, element_size_bits));
+            new_mem = SetElementAtAddress(new_mem, _ToByteMemoryAddress(ZExt(tile_idx, ZA_ADDR_WIDTH) + BvConst(i * num_tiles, ZA_ADDR_WIDTH), col), element_size_bits, GetElementInVectorFromLSB(data, i, element_size_bits));
         }
         return new_mem;
     }
@@ -358,6 +359,49 @@ namespace arm {
             result = SetElementInVectorFromLSB(result, i, element_size_bits, new_element, vector_length_bits);
         }
         return result;
+    }
+    
+    ExprRef ArmSme::CombineTileWithHorizontalVector(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, const ExprRef& is_zero_mode, std::function<ExprRef(ExprRef a, ExprRef b)> combine_fn) {
+        assert(row_pred.bit_width() == col_pred.bit_width());
+        assert(row_pred.bit_width() == P_REG_WIDTH);
+    
+        NumericType dim = Z_REG_WIDTH / element_size_bits;
+        
+        auto new_mem = mem;
+        for (size_t row = 0; row < dim; row++){
+            auto hor_slice = _GetTypedHorizontalSlice(new_mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, element_size_bits);
+            for (size_t col = 0; col < dim; col++){
+                auto old_elem = GetElementInVectorFromLSB(hor_slice, col, element_size_bits);
+                auto extra_elem = GetElementInVectorFromLSB(vec, col, element_size_bits);
+                ExprRef row_col_activated = (GetBitFromLSB(row_pred, row) != 0) & (GetBitFromLSB(col_pred, col) != 0);
+                auto new_elem = Ite(row_col_activated, combine_fn(old_elem, extra_elem), Ite(is_zero_mode, BvConst(0, element_size_bits), old_elem));
+                hor_slice = SetElementInVectorFromLSB(hor_slice, col, element_size_bits, new_elem, Z_REG_WIDTH);
+            }
+            // update the entire horizontal slice
+            new_mem = _SetTypedHorizontalSlice(new_mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, element_size_bits, hor_slice);
+        }
+        return new_mem;
+    }
+    ExprRef ArmSme::CombineTileWithVerticalVector(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, const ExprRef& is_zero_mode, std::function<ExprRef(ExprRef a, ExprRef b)> combine_fn) {
+        assert(row_pred.bit_width() == col_pred.bit_width());
+        assert(row_pred.bit_width() == P_REG_WIDTH);
+    
+        NumericType dim = Z_REG_WIDTH / element_size_bits;
+        
+        auto new_mem = mem;
+        for (size_t col = 0; col < dim; col++){
+            auto ver_slice = _GetTypedVerticalSlice(new_mem, BvConst(col, ZA_ADDR_WIDTH), tile_idx, element_size_bits);
+            for (size_t row = 0; row < dim; row++){
+                auto old_elem = GetElementInVectorFromLSB(ver_slice, row, element_size_bits);
+                auto extra_elem = GetElementInVectorFromLSB(vec, row, element_size_bits);
+                ExprRef row_col_activated = (GetBitFromLSB(row_pred, row) != 0) & (GetBitFromLSB(col_pred, col) != 0);
+                auto new_elem = Ite(row_col_activated, combine_fn(old_elem, extra_elem), Ite(is_zero_mode, BvConst(0, element_size_bits), old_elem));
+                ver_slice = SetElementInVectorFromLSB(ver_slice, row, element_size_bits, new_elem, Z_REG_WIDTH);
+            }
+            // update the entire vertical slice
+            new_mem = _SetTypedVerticalSlice(new_mem, BvConst(col, ZA_ADDR_WIDTH), tile_idx, element_size_bits, ver_slice);
+        }
+        return new_mem;
     }
 
 }  // namespace arm
