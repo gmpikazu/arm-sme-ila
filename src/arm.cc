@@ -2,40 +2,51 @@
 
 namespace arm {
     ArmSme::ArmSme() :
-        // NOTE internal states
         m(Ila("arm")),
+
+        // TODO these need more thought
+        // Tszh(m.NewBvInput("Tszh",)1);
+        // Tszl(m.NewBvInput("Tszl",)3);
+        // Size(m.NewBvInput("Size",)2);
+        
+        // NOTE internal states
         za(m.NewMemState("ZA", ZA_ADDR_WIDTH, BYTE)),
         pstate_sm(m.NewBoolState("PSTATE_SM")),
-        pstate_za(m.NewBoolState("PSTATE_ZA"))
-        Opcode(m.NewBvInput("Opcode",)TEMP_BIT_WIDTH);
-        Op1(m.NewBvInput("Op1",)3);
-        Op2(m.NewBvInput("Op2",)3);
-        CRm(m.NewBvInput("CRm",)4);
-        ZAda(m.NewBvInput("ZAda",)TEMP_BIT_WIDTH);
-        ZAt(m.NewBvInput("ZAt",)TEMP_BIT_WIDTH);
-        V(m.NewBvInput("V",)1);
-        I1(m.NewBvInput("I1",)1);
-        Pm(m.NewBvInput("Pm",)TEMP_BIT_WIDTH);
-        Pn(m.NewBvInput("Pn",)TEMP_BIT_WIDTH);
-        Pd(m.NewBvInput("Pd",)TEMP_BIT_WIDTH); 
-        Zn(m.NewBvInput("Zn",)TEMP_BIT_WIDTH);
-        Zm(m.NewBvInput("Zm",)TEMP_BIT_WIDTH);
-        Zd(m.NewBvInput("Zd",)TEMP_BIT_WIDTH);
-        Rs(m.NewBvInput("Rs",)TEMP_BIT_WIDTH);
-        Rd(m.NewBvInput("Rd",)TEMP_BIT_WIDTH);
-        Rn(m.NewBvInput("Rn",)TEMP_BIT_WIDTH);
-        Rm(m.NewBvInput("Rm",)TEMP_BIT_WIDTH);
-        Rv(m.NewBvInput("Rv",)TEMP_BIT_WIDTH);
-        Imm2(m.NewBvInput("Imm2",)2);
-        Imm3(m.NewBvInput("Imm3",)3);
-        Imm4(m.NewBvInput("Imm4",)4);
-        Imm6(m.NewBvInput("Imm6",)6);
-        Imm8(m.NewBvInput("Imm8",)8);
-        Pg(m.NewBvInput("Pg",)3); // unsure if consistent
-        Tszh(m.NewBvInput("Tszh",)1);
-        Tszl(m.NewBvInput("Tszl",)3);
-        Size(m.NewBvInput("Size",)2);
+        pstate_za(m.NewBoolState("PSTATE_ZA")),
+
+        XZR(BvConst(0, 64)),
+        WZR(BvConst(0, 32)),
+
+        cmd(m.NewBvState("cmd", TEMP_LARGEST_ADDR_WIDTH)), // TODO TBC
+
+        ZAda(m.NewBvState("ZAda", std::log2(SVL_B))),
+        ZAn(m.NewBvState("ZAn", std::log2(SVL_B))),
+        ZAd(m.NewBvState("ZAd", std::log2(SVL_B))),
+        ZAt(m.NewBvState("ZAt", std::log2(SVL_B))),
+        HV(m.NewBoolState("HV")),
+
+        Rs(m.NewBvState("Rs", std::log2(32))),
+        Rv(m.NewBvState("Rv", std::log2(32))),
+        Rn(m.NewBvState("Rn", std::log2(64))),
+        Rm(m.NewBvState("Rm", std::log2(64))),
+        Rd(m.NewBvState("Rd", std::log2(64))),
+        
+        Imm(m.NewBvState("Imm", 8)), // TODO TBC: what is the maximum bits needed?
+        Imm1(Imm(1, 0)), Imm2((Imm(2, 0))),
+        Imm3(Imm(3, 0)), Imm4(Imm(4, 0)),
+        Imm6(Imm(6, 0)), Imm8(Imm(8, 0)),
+
+        Pg(m.NewBvState("Pg", P_ADDR_WIDTH)),
+        Pd(m.NewBvState("Pd", P_ADDR_WIDTH)),
+        Pn(m.NewBvState("Pn", P_ADDR_WIDTH)),
+        Pm(m.NewBvState("Pm", P_ADDR_WIDTH)),
+
+        Zd(m.NewBvState("Zd", Z_ADDR_WIDTH)),
+        Zn(m.NewBvState("Zn", Z_ADDR_WIDTH)),
+        Zm(m.NewBvState("Zm", Z_ADDR_WIDTH))
     {
+        assert(Z_REG_WIDTH == SVL);
+
         // initialize vector registers of length SVL bits
         for (size_t i = 0; i < Z_REG_COUNT; i++) {
             z_regs.push_back(m.NewBvState("z"+std::to_string(i), Z_REG_WIDTH));
@@ -44,10 +55,23 @@ namespace arm {
         for (size_t i = 0; i < P_REG_COUNT; i++) {
             p_regs.push_back(m.NewBvState("p"+std::to_string(i), P_REG_WIDTH));
         }
+        // initialize GPRs of length 64 bits
+        for (size_t i = 0; i < GPR_COUNT; i++) {
+            GPRs.push_back(m.NewBvState("x"+std::to_string(i), 64));
+        }
 
         AddInstructions();
     }
     
+    ExprRef ToConstrainedTileIndex(const ExprRef& tile_idx, const NumericType& esize) {
+        if (esize == BYTE) return BvConst(1, 1); // edge case: log2(1)=0 fails
+        // (1): dim = SVL / esize
+        // (2): num_tiles = SVL_B / dim
+        // SVL_B / (SVL / esize) = (SVL / 8) * (esize / SVL) = esize / 8
+        NumericType num_tiles = esize / BYTE;
+        return Extract(tile_idx, std::log2(num_tiles)-1, 0);
+    }
+
     ExprRef ArmSme::_GetByte(const ExprRef& mem, const ExprRef& addr) { 
         return Load(mem, Extract(addr, ZA_ADDR_WIDTH-1, 0));
     }
@@ -273,8 +297,8 @@ namespace arm {
         }
     }
     
-    ExprRef ArmSme::BaseRegPlusImm(const ExprRef& base_reg, const ExprRef& imm) {
-        return ZExt(base_reg, TEMP_LARGEST_ADDR_WIDTH) + ZExt(imm, TEMP_LARGEST_ADDR_WIDTH);
+    ExprRef ArmSme::BaseRegPlusImm(const ExprRef& base_reg_value, const ExprRef& imm) {
+        return ZExt(base_reg_value, TEMP_LARGEST_ADDR_WIDTH) + ZExt(imm, TEMP_LARGEST_ADDR_WIDTH);
     }
     
     ExprRef ArmSme::MaskWithSinglePredicate(const ExprRef& source, const ExprRef& dest, const NumericType& element_size_bits, const NumericType& vector_length_bits, const ExprRef& predicate, const ExprRef& is_zero_mode) {
@@ -318,42 +342,45 @@ namespace arm {
         
         // NOTE instructions below requires Streaming SVE mode
         ExprRef SME_ON = pstate_sm & pstate_za;
+        #define constrained(tile_idx, esize) ToConstrainedTileIndex(tile_idx, esize)
+        
         // ASK since MOV is alias to MOVA, maybe no need to implement
         { // MOVA (tile to vector)
-            auto f = [&](NumericType opcode, NumericType esize, std::string suffix){
+            auto f = [&](NumericType opcode, NumericType esize, std::string suffix, ExprRef tile_idx, ExprRef imm){
                 InstrRef instr = m.NewInstr("MOVA_T2V"+suffix);
                 auto decode = SME_ON & (cmd == opcode);
                 instr.SetDecode(decode);
 
-                auto slice_idx = BaseRegPlusImm(Ws, Imm);
-                auto source = GetTypedSlice(za, HV, ZAd, slice_idx, esize);
-                auto dest = GetVectorRegister(Zn);
-                auto masked = MaskWithSinglePredicate(source, dest, esize, SVL, GetPredicateRegister(Pn), BoolConst(false));
+                auto slice_idx = BaseRegPlusImm(Get32BitGPR(Rs), imm);
+                // TODO what to do with ZAn, different for each bit width
+                auto source = GetTypedSlice(za, HV, tile_idx, slice_idx, esize);
+                auto dest = GetVectorRegister(Zd);
+                auto masked = MaskWithSinglePredicate(source, dest, esize, SVL, GetPredicateRegister(Pg), BoolConst(false));
                 UpdateSingleVectorRegister(instr, Zn, masked);
             };
-            f(TEMP_OPCODE, BYTE, ".B");
-            f(TEMP_OPCODE, HALF, ".H");
-            f(TEMP_OPCODE, WORD, ".S");
-            f(TEMP_OPCODE, DOUBLE, ".D");
-            f(TEMP_OPCODE, QUAD, ".Q");
+            f(TEMP_OPCODE, BYTE, ".B", constrained(ZAn, BYTE), Imm4);
+            f(TEMP_OPCODE, HALF, ".H", constrained(ZAn, HALF), Imm3);
+            f(TEMP_OPCODE, WORD, ".S", constrained(ZAn, WORD), Imm2);
+            f(TEMP_OPCODE, DOUBLE, ".D", constrained(ZAn, DOUBLE), Imm1);
+            f(TEMP_OPCODE, QUAD, ".Q", constrained(ZAn, QUAD), BvConst(0, 1));
         }
         { // MOVA (vector to tile)
-            auto f = [&](NumericType opcode, NumericType esize, std::string suffix){
+            auto f = [&](NumericType opcode, NumericType esize, std::string suffix, ExprRef tile_idx, ExprRef imm){
                 InstrRef instr = m.NewInstr("MOVA_V2T"+suffix);
                 auto decode = SME_ON & (cmd == opcode);
                 instr.SetDecode(decode);
                 
-                auto slice_idx = BaseRegPlusImm(Ws, Imm);
+                auto slice_idx = BaseRegPlusImm(Get32BitGPR(Rs), imm);
                 auto source = GetVectorRegister(Zn);
-                auto dest = GetTypedSlice(za, HV, ZAd, slice_idx, BYTE);
+                auto dest = GetTypedSlice(za, HV, tile_idx, slice_idx, BYTE);
                 auto masked = MaskWithSinglePredicate(source, dest, BYTE, SVL, GetPredicateRegister(Pn), BoolConst(false));
-                UpdateSingleTypedSlice(instr, HV, ZAd, slice_idx, BYTE, masked);
+                UpdateSingleTypedSlice(instr, HV, tile_idx, slice_idx, BYTE, masked);
             };
-            f(TEMP_OPCODE, BYTE, ".B");
-            f(TEMP_OPCODE, HALF, ".H");
-            f(TEMP_OPCODE, WORD, ".S");
-            f(TEMP_OPCODE, DOUBLE, ".D");
-            f(TEMP_OPCODE, QUAD, ".Q");
+            f(TEMP_OPCODE, BYTE, ".B", constrained(ZAd, BYTE), Imm4);
+            f(TEMP_OPCODE, HALF, ".H", constrained(ZAd, HALF), Imm3);
+            f(TEMP_OPCODE, WORD, ".S", constrained(ZAd, WORD), Imm2);
+            f(TEMP_OPCODE, DOUBLE, ".D", constrained(ZAd, DOUBLE), Imm1);
+            f(TEMP_OPCODE, QUAD, ".Q", constrained(ZAd, QUAD), BvConst(0, 1));
         }
         { // ZERO
             InstrRef instr = m.NewInstr("ZERO");
@@ -365,7 +392,7 @@ namespace arm {
             ExprRef new_za = za;
             for (size_t tile_idx = 0; tile_idx < 8; tile_idx++){
                 // ASK is it really from LSB?
-                ExprRef activated = (GetBitFromLSB(imm8, tile_idx) != 0);
+                ExprRef activated = (GetBitFromLSB(Imm8, tile_idx) != 0);
                 ExprRef zeroed_tile_za = new_za;
                 // construct new ZA expr where tile[tile_idx] is zeroed out
                 for (size_t row_idx = 0; row_idx < 8; row_idx++){

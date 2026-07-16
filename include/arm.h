@@ -21,10 +21,10 @@ namespace arm {
     #define DOUBLE 64
     #define QUAD 128
 
-    #define TEMP_BIT_WIDTH 0 // TODO CHANGE THIS LATER
-
     constexpr NumericType SVL = 128;
     constexpr NumericType SVL_B = SVL / BYTE;
+    constexpr NumericType GPR_COUNT = 31;
+    const NumericType GPR_ADDR_WIDTH = std::log2(GPR_COUNT);
     constexpr NumericType ZA_BYTE_SIZE = SVL_B * SVL_B;
     const NumericType ZA_ADDR_WIDTH = std::log2(ZA_BYTE_SIZE);
     constexpr NumericType Z_REG_COUNT = 32;
@@ -38,72 +38,85 @@ namespace arm {
     
 using namespace ilang;
 
-class ArmSme {
+class ArmSme {    
     Ila m;
+    
+    // TODO these need more thought
+    // <pstatefield> is encoded in the following
+    // ExprRef Op1;
+    // ExprRef Op2;
+    // ExprRef CRm;
+
+    // <T> is encoded in tszh and tszl or size
+    // ExprRef Tszh;
+    // ExprRef Tszl;
+    // ExprRef Size;
+    
+    // NOTE internal states
     ExprRef za;
     ExprRef pstate_sm;
     ExprRef pstate_za;
     std::vector<ExprRef> z_regs;
-    std::vector<ExprRef> p_regs;
-    // X registers (64 bit)
-    // W registers (32 bit)
+    std::vector<ExprRef> p_regs; // ASK how many P registers? 8 or 16?
+
+    /** ASK check my understanding
+     * @note there are 31 64-bit GPRs (X0-X30)
+     * @note W registers (32 bit) are lower bits of X registers (64 bit)
+     * @note IMPLEMENTATION: no restriction of which W12-W15 registers to access
+     *       model can freely use any GPR during instruction update
+     * @note zero extension happens when writing to W registers
+     * @note XZR and WZR are zero registers (default value of optional fields)
+     */
+    std::vector<ExprRef> GPRs; // X0-X30, W0-W30
+    ExprRef XZR; // 64-bit zero register
+    ExprRef WZR; // 32-bit zero register
     
-    // NOTE Input States and Alias Names
-    ExprRef cmd; // TODO for opcode
-    ExprRef ZAd; // tile_idx
+    // NOTE Input States
+    // TODO temporarily use mutually exclusive `cmd` codes for instr select
+    ExprRef cmd;
+
+    // Tile Selector
+    // NOTE instructions MUST CALL ToConstrainedTileIndex() to get tile_idx
+    ExprRef ZAda; // destination tile to accumulate to
+    ExprRef ZAn; // source tile to move out of
+    ExprRef ZAd; // destination tile to move into
+    ExprRef ZAt; // target tile for DRAM load/store
     ExprRef HV; // horizontal BoolConst(false), vertical BoolConst(true)
-    ExprRef Ws; // TODO 32 bit name of the base register
-    ExprRef Imm; // TODO constrained immediate offset of Ws (NEED CHANGE)
-    ExprRef Pn; // first predicate register name (overloaded for Pg)
-    ExprRef Pm; // second predicate register name
-    ExprRef Zn; // first vector register name
-    ExprRef imm8; // ASK used as <mask> by ZERO instruction
 
-    // Input states
-
-    ExprRef Opcode;
-
-    // <pstatefield> is encoded in the following
-    ExprRef Op1;
-    ExprRef Op2;
-    ExprRef CRm;
+    // GPR Names
+    ExprRef Rs; // 32-bit name of W register (32 lower bits of X register)
+    ExprRef Rv; // 32-bit name of W register (32 lower bits of X register)
+    ExprRef Rn; // 64-bit name of X register
+    ExprRef Rm; // 64-bit name of X register
+    ExprRef Rd; // 64-bit destination register
     
-    ExprRef ZAda;
-    ExprRef ZAt;
-
-    ExprRef V;
-    ExprRef I1;
-
-    ExprRef Pm;
-    ExprRef Pn;
-    ExprRef Pd; 
-    
-    ExprRef Zn;
-    ExprRef Zm;
-    ExprRef Zd;
-
-    ExprRef Rs;
-    ExprRef Rd;
-    ExprRef Rn;
-    ExprRef Rm;
-    ExprRef Rv;
-
-    // ExprRef Imm (not sure if actual field)
+    // Immediates (signed or unsigned depends on instruction interpretation)
+    ExprRef Imm;
+    // NOTE Imm is widest, all ImmN's below are lower-N-bits of Imm
+    ExprRef Imm1; // (also known as i1)
     ExprRef Imm2;
     ExprRef Imm3;
     ExprRef Imm4;
     ExprRef Imm6;
     ExprRef Imm8;
+    
+    // Predicate Register Names
+    ExprRef Pg; // governing
+    ExprRef Pd; // destination
+    ExprRef Pn; // first source
+    ExprRef Pm; // second source
+    
+    // Scalable Vector Register Names (Z registers)
+    ExprRef Zd; // destination
+    ExprRef Zn; // first source
+    ExprRef Zm; // second source
 
-    ExprRef Pg;
-
-    // <T> is encoded in tszh and tszl or size
-    ExprRef Tszh;
-    ExprRef Tszl;
-    ExprRef Size;
-
+    void InitUninterpretedFunctions();
     void AddInstructions();
 
+    // NOTE convert tile_idx into constrained range: 0 to num_tiles-1
+    ExprRef ToConstrainedTileIndex(const ExprRef& tile_idx, const NumericType& esize);
+    
     // TODO should've made GetAtRowCol() that uses _ToMemoryAddress() internally
     // @brief Load single element from memory
     // @param[in] mem the memory state to read from
@@ -180,6 +193,12 @@ class ArmSme {
     // NOTE make sure val's bit-width matches the target register
     void UpdateSingleVectorRegister(InstrRef& instr, const ExprRef& z_idx, const ExprRef& val);
     void UpdateSinglePredicateRegister(InstrRef& instr, const ExprRef& p_idx, const ExprRef& val);
+    // BUG continue these
+    // NOTE return value and write value must be 32-bit or 64-bit respectively
+    ExprRef Get32BitGPR(const ExprRef& w_idx); // for W register access
+    ExprRef Get64BitGPR(const ExprRef& x_idx); // for X register access
+    ExprRef UpdateSingle32BitGPR(InstrRef& instr, const ExprRef& w_idx, const ExprRef& val); // perform zero extension before writing to the whole 64-bit X register
+    ExprRef UpdateSingle64BitGPR(InstrRef& instr, const ExprRef& x_idx, const ExprRef& val);
     
     // TODO make BaseRegPlusImm(Ws, imm) and returns (Ws+imm), passed into our current helpers that does modulo internally (imm range must be constrained depending on the specific instruction too)
     ExprRef BaseRegPlusImm(const ExprRef& base_reg, const ExprRef& imm);

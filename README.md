@@ -1,14 +1,17 @@
 # Project Plan
 ## Crucial Clarification (ask in meeting)
-- Untyped data type instruction how to encode and operate
-- How to model DRAM memory, because we need to agree on the memory model to prove between Gemmini and ARM SME
+- Postpone Store DRAM
+- SVE2 instructions and <T> field
+- How to verify that the ILA is correct?
+- How to model DRAM memory, because we need to agree on the memory model to prove between Gemmini and ARM SME (maybe use uninterpreted functions)
     - To implement `LD`, `ST` for each data type
 - How to deal with different float types, widening, and arithmetic (signed & unsigned)
     - To implement sum, outer product, and other operations
-- Must `ZA0` single choice tile access be independent instruction? I handled it with the `if(dim==1)` check already though before doing `log2(dim)`
 - What is the length of the `Imm` field, it differs based on instruction it seems
 - How many predicate registers do we need to have?
 - `esize` is baked into opcode, and we use lambdas for .B .H .W .D .Q suffixes, right?
+- Must `ZA0` single choice tile access be independent instruction? I handled it with the `if(dim==1)` check already though before doing `log2(dim)`
+- Untyped data type instruction how to encode and operate
 ## Next Steps
 - Helper that takes two vectors and `esize`, returns a new vector that combines the two vectors using a Lambda `combine()` function: `add`, `sub`, `accumulate`
     - For outer products, sums, accumulate, etc
