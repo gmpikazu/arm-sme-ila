@@ -205,6 +205,7 @@ class ArmSme {
     void UpdateSingle64BitGPR(InstrRef& instr, const ExprRef& x_idx, const ExprRef& val);
     
     // TODO make BaseRegPlusImm(Ws, imm) and returns (Ws+imm), passed into our current helpers that does modulo internally (imm range must be constrained depending on the specific instruction too)
+    // NOTE ARM actually does modulo by using Imm1, Imm2, ..., Imm8 derived from Imm
     ExprRef BaseRegPlusImm(const ExprRef& base_reg, const ExprRef& imm);
     
     // NOTE source and dest must have same bit-width, predicate from p_regs[p_idx]
@@ -218,6 +219,9 @@ class ArmSme {
 
     ExprRef CombineTileWithHorizontalVector(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, const ExprRef& is_zero_mode, std::function<ExprRef(ExprRef old, ExprRef extra)> combine_fn);
     ExprRef CombineTileWithVerticalVector(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, const ExprRef& is_zero_mode, std::function<ExprRef(ExprRef old, ExprRef extra)> combine_fn);
+
+    // TODO adapt to floating point
+    ExprRef CombineTileWithMatrices(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, bool sub_instead_of_add, bool op1_unsigned, bool op2_unsigned); // SExt vs ZExt
 
   public:
     ArmSme();

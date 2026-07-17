@@ -67,7 +67,7 @@ namespace arm {
     }
     
     ExprRef ArmSme::ToConstrainedTileIndex(const ExprRef& tile_idx, const NumericType& esize) {
-        if (esize == BYTE) return BvConst(1, 1); // edge case: log2(1)=0 fails
+        if (esize == BYTE) return BvConst(0, 1); // edge case: log2(1)=0 fails
         // (1): dim = SVL / esize
         // (2): num_tiles = SVL_B / dim
         // SVL_B / (SVL / esize) = (SVL / 8) * (esize / SVL) = esize / 8
@@ -400,6 +400,35 @@ namespace arm {
             }
             // update the entire vertical slice
             new_mem = _SetTypedVerticalSlice(new_mem, BvConst(col, ZA_ADDR_WIDTH), tile_idx, element_size_bits, ver_slice);
+        }
+        return new_mem;
+    }
+    
+    ExprRef ArmSme::CombineTileWithMatrices(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, bool sub_instead_of_add, bool op1_unsigned, bool op2_unsigned) {
+        NumericType dim = Z_REG_WIDTH / element_size_bits;
+        auto new_mem = mem;
+        for (size_t row = 0; row < dim; row++){
+            auto hor_slice = _GetTypedHorizontalSlice(new_mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, element_size_bits);
+            for (size_t col = 0; col < dim; col++){
+                auto sum = GetElementInVectorFromLSB(hor_slice, col, element_size_bits);
+                // widening dot product (smaller bits into larger bits)
+                for (size_t k = 0; k < 4; k++){
+                    // ASK note sure about predicates, ARM uses `ElemP[esize DIV 4]`
+                    auto activated = (GetBitFromLSB(row_pred, 4*row+k) != 0) & (GetBitFromLSB(col_pred, 4*col+k) != 0);
+
+                    auto op1 = GetElementInVectorFromLSB(vec1, 4*row+k, element_size_bits / 4);
+                    op1 = op1_unsigned ? ZExt(op1, element_size_bits) : SExt(op1, element_size_bits);
+                    auto op2 = GetElementInVectorFromLSB(vec2, 4*col+k, element_size_bits / 4);
+                    op2 = op2_unsigned ? ZExt(op2, element_size_bits) : SExt(op2, element_size_bits);
+                    auto prod = op1 * op2;
+                    if (sub_instead_of_add) prod = -prod;
+                    sum = Ite(activated, sum + prod, sum); // only updated if active
+                }
+                // update hor_slice with new sum
+                hor_slice = SetElementInVectorFromLSB(hor_slice, col, element_size_bits, sum, Z_REG_WIDTH);
+            }
+            // get new_mem by updating the entire horizontal slice
+            new_mem = _SetTypedHorizontalSlice(new_mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, element_size_bits, hor_slice);
         }
         return new_mem;
     }

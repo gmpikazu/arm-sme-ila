@@ -38,7 +38,6 @@ namespace arm {
                 instr.SetDecode(decode);
 
                 auto slice_idx = BaseRegPlusImm(Get32BitGPR(Rs), imm);
-                // TODO what to do with ZAn, different for each bit width
                 auto source = GetTypedSlice(za, HV, tile_idx, slice_idx, esize);
                 auto dest = GetVectorRegister(Zd);
                 auto masked = MaskWithSinglePredicate(source, dest, esize, SVL, GetPredicateRegister(Pg), BoolConst(false));
@@ -120,6 +119,37 @@ namespace arm {
             };
             f(TEMP_OPCODE, WORD, ".S", constrained(ZAda, WORD));
             f(TEMP_OPCODE, DOUBLE, ".D", constrained(ZAda, DOUBLE));
+        }
+        { // Integer Outer Product and Accumulate or Subtract
+            auto f = [&](std::string name, NumericType opcode, NumericType esize, std::string suffix, ExprRef tile_idx, bool sub_op, bool op1_unsigned, bool op2_unsigned){
+                InstrRef instr = m.NewInstr(name+suffix);
+                auto decode = SME_ON & (cmd == opcode);
+                instr.SetDecode(decode);
+
+                auto new_za = CombineTileWithMatrices(za, tile_idx, GetVectorRegister(Zn), GetVectorRegister(Zm), GetPredicateRegister(Pn), GetPredicateRegister(Pm), esize, sub_op, op1_unsigned, op2_unsigned);
+                instr.SetUpdate(za, new_za);
+            };
+            struct inst {
+                std::string name;
+                NumericType opcode;
+                bool sub_op;
+                bool op1_unsigned;
+                bool op2_unsigned;
+            };
+            std::vector<inst> inst_list = {
+                {"SMOPA", TEMP_OPCODE, false, false, false},
+                {"SMOPS", TEMP_OPCODE, true, false, false},
+                {"SUMOPA", TEMP_OPCODE, false, false, true},
+                {"SUMOPS", TEMP_OPCODE, true, false, true},
+                {"UMOPA", TEMP_OPCODE, false, true, true},
+                {"UMOPS", TEMP_OPCODE, true, true, true},
+                {"USMOPA", TEMP_OPCODE, false, true, false},
+                {"USMOPS", TEMP_OPCODE, true, true, false}
+            };
+            for (auto inst : inst_list){
+                f(inst.name, inst.opcode, WORD, " (8b->32b)", constrained(ZAda, WORD), inst.sub_op, inst.op1_unsigned, inst.op2_unsigned);
+                f(inst.name, inst.opcode, DOUBLE, " (16b->64b)", constrained(ZAda, DOUBLE), inst.sub_op, inst.op1_unsigned, inst.op2_unsigned);
+            }
         }
     }
     
