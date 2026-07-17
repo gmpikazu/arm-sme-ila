@@ -151,6 +151,31 @@ namespace arm {
                 f(inst.name, inst.opcode, DOUBLE, " (16b->64b)", constrained(ZAda, DOUBLE), inst.sub_op, inst.op1_unsigned, inst.op2_unsigned);
             }
         }
+        { // ADDSPL
+            InstrRef instr = m.NewInstr("ADDSPL");
+            auto decode = SME_ON & (cmd == TEMP_OPCODE);
+            instr.SetDecode(decode);
+            
+            auto val = BvConst(P_REG_WIDTH / BYTE, 64) * SExt(Imm6, 64) + Get64BitGPR(Rn, true);
+            UpdateSingle64BitGPR(instr, Rd, val, true);
+        }
+        { // ADDSVL
+            InstrRef instr = m.NewInstr("ADDSVL");
+            auto decode = SME_ON & (cmd == TEMP_OPCODE);
+            instr.SetDecode(decode);
+            
+            auto val = BvConst(Z_REG_WIDTH / BYTE, 64) * SExt(Imm6, 64) + Get64BitGPR(Rn, true);
+            UpdateSingle64BitGPR(instr, Rd, val, true);
+        }
+        { // RDSVL
+            InstrRef instr = m.NewInstr("RDSVL");
+            auto decode = SME_ON & (cmd == TEMP_OPCODE);
+            instr.SetDecode(decode);
+            
+            // NOTE no SP support for this instruction
+            auto val = BvConst(Z_REG_WIDTH / BYTE, 64) * SExt(Imm6, 64);
+            UpdateSingle64BitGPR(instr, Rd, val);
+        }
     }
     
 }  // namespace arm

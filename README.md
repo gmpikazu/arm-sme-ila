@@ -1,7 +1,7 @@
 # Project Plan
+## Remaining Modelling Tasks
+- Load store DRAM, floating point instructions, SVE2 instructions, <T> field
 ## Crucial Clarification (ask in meeting)
-- Postpone Store DRAM
-- SVE2 instructions and <T> field
 - How to verify that the ILA is correct?
 - How to model DRAM memory, because we need to agree on the memory model to prove between Gemmini and ARM SME (maybe use uninterpreted functions)
     - To implement `LD`, `ST` for each data type

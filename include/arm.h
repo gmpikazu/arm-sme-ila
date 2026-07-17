@@ -67,7 +67,9 @@ class ArmSme {
      *       model can freely use any GPR during instruction update
      * @note zero extension happens when writing to W registers
      * @note XZR and WZR are zero registers (default value of optional fields)
+     * @note 31-th GPR is either SP (64 bit) or XZR / WZR
      */
+    ExprRef SP; // 64-bit stack pointer
     std::vector<ExprRef> GPRs; // X0-X30, W0-W30
     ExprRef XZR; // 64-bit zero register
     ExprRef WZR; // 32-bit zero register
@@ -199,10 +201,11 @@ class ArmSme {
     void UpdateSinglePredicateRegister(InstrRef& instr, const ExprRef& p_idx, const ExprRef& val);
     
     // NOTE return value and write value must be 32-bit or 64-bit respectively
+    // @brief use_sp true if SP is used instead of XZR/WZR as GPR[31]
     ExprRef Get32BitGPR(const ExprRef& w_idx); // for W register access
-    ExprRef Get64BitGPR(const ExprRef& x_idx); // for X register access
+    ExprRef Get64BitGPR(const ExprRef& x_idx, bool use_sp=false); // for X register access
     void UpdateSingle32BitGPR(InstrRef& instr, const ExprRef& w_idx, const ExprRef& val); // perform zero extension before writing to the whole 64-bit X register
-    void UpdateSingle64BitGPR(InstrRef& instr, const ExprRef& x_idx, const ExprRef& val);
+    void UpdateSingle64BitGPR(InstrRef& instr, const ExprRef& x_idx, const ExprRef& val, bool use_sp=false);
     
     // TODO make BaseRegPlusImm(Ws, imm) and returns (Ws+imm), passed into our current helpers that does modulo internally (imm range must be constrained depending on the specific instruction too)
     // NOTE ARM actually does modulo by using Imm1, Imm2, ..., Imm8 derived from Imm

@@ -14,6 +14,7 @@ namespace arm {
         pstate_sm(m.NewBoolState("PSTATE_SM")),
         pstate_za(m.NewBoolState("PSTATE_ZA")),
 
+        SP(m.NewBvState("SP", 64)),
         XZR(BvConst(0, 64)),
         WZR(BvConst(0, 32)),
 
@@ -310,15 +311,17 @@ namespace arm {
         for (size_t i = 1; i < GPR_COUNT; i++){
             expr = Ite(w_idx == i, Extract(GPRs[i], 31, 0), expr);
         }
+        expr = Ite(w_idx == 31, WZR, expr);
         return expr;
     }
 
-    ExprRef ArmSme::Get64BitGPR(const ExprRef& x_idx){
+    ExprRef ArmSme::Get64BitGPR(const ExprRef& x_idx, bool use_sp){
         assert(x_idx.bit_width() <= GPR_ADDR_WIDTH);
         ExprRef expr = GPRs[0];
         for (size_t i = 1; i < GPR_COUNT; i++){
             expr = Ite(x_idx == i, GPRs[i], expr);
         }
+        expr = use_sp ? Ite(x_idx == 31, SP, expr) : Ite(x_idx == 31, XZR, expr);
         return expr;
     }
 
@@ -328,14 +331,17 @@ namespace arm {
         for (size_t i = 0; i < GPR_COUNT; i++){
             instr.SetUpdate(GPRs[i], Ite(w_idx == i, ZExt(val, 64), GPRs[i]));
         }
+        // if w_idx == 31: WZR naturally disregarded
     }
 
-    void ArmSme::UpdateSingle64BitGPR(InstrRef& instr, const ExprRef& x_idx, const ExprRef& val){
+    void ArmSme::UpdateSingle64BitGPR(InstrRef& instr, const ExprRef& x_idx, const ExprRef& val, bool use_sp){
         if (val.bit_width() != 64) throw std::runtime_error("UpdateSingle64BitGPR(): val's bit-width must be 64 bits");
         assert(x_idx.bit_width() <= GPR_ADDR_WIDTH);
         for (size_t i = 0; i < GPR_COUNT; i++){
             instr.SetUpdate(GPRs[i], Ite(x_idx == i, val, GPRs[i]));
         }
+        if (use_sp) instr.SetUpdate(SP, Ite(x_idx == 31, val, SP));
+        // if !use_sp && x_idx == 31: XZR naturally disregarded
     }
     
     ExprRef ArmSme::BaseRegPlusImm(const ExprRef& base_reg_value, const ExprRef& imm) {
