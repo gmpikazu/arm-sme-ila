@@ -46,7 +46,31 @@ namespace arm {
 
         Zd(m.NewBvInput("Zd", Z_ADDR_WIDTH)),
         Zn(m.NewBvInput("Zn", Z_ADDR_WIDTH)),
-        Zm(m.NewBvInput("Zm", Z_ADDR_WIDTH))
+        Zm(m.NewBvInput("Zm", Z_ADDR_WIDTH)),
+        
+        // NOTE Sort Refs
+        // ASK bfloat and fp16 should have different format
+        bf16(SortRef::BV(16)),
+        fp64(SortRef::BV(64)),
+        fp32(SortRef::BV(32)),
+        fp16(SortRef::BV(16)),
+
+        // ASK bit representation of zero for bfloat
+        fp32_zero(BvConst(0, 32)),
+        fp16_zero(BvConst(0, 16)), // ASK same value as bf16_zero though
+        bf16_zero(BvConst(0, 16)),
+        
+        // NOTE Uninterpreted Functions
+        fpneg64("fpneg64", fp64, fp64),
+        fpneg32("fpneg32", fp32, fp32),
+        fpneg16("fpneg16", fp16, fp16),
+        bfneg16("bfneg16", bf16, bf16),
+        fpmac64("fpmac64", fp64, {fp64, fp64, fp64}),
+        fpmac32("fpmac32", fp32, {fp32, fp32, fp32}),
+        fpdotadd32to32("fpdotadd32to32", fp32, {fp32, fp32, fp32, fp32, fp32}),
+        // TODO TBC: check the argument sizes below
+        fpdotadd16to32("fpdotadd16to32", fp32, {fp32, fp16, fp16, fp16, fp16}),
+        bfdotadd16to32("bfdotadd16to32", fp32, {fp32, bf16, bf16, bf16, bf16})
     {
         assert(Z_REG_WIDTH == SVL);
 
@@ -63,7 +87,6 @@ namespace arm {
             GPRs.push_back(m.NewBvState("x"+std::to_string(i), 64));
         }
 
-        InitUninterpretedFunctions();
         AddInstructions();
     }
     
@@ -410,7 +433,7 @@ namespace arm {
         return new_mem;
     }
     
-    ExprRef ArmSme::CombineTileWithMatrices(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, bool sub_instead_of_add, bool op1_unsigned, bool op2_unsigned) {
+    ExprRef ArmSme::IntegerCombineTileWithMatrices(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, bool sub_instead_of_add, bool op1_unsigned, bool op2_unsigned) {
         NumericType dim = Z_REG_WIDTH / element_size_bits;
         auto new_mem = mem;
         for (size_t row = 0; row < dim; row++){
@@ -422,14 +445,73 @@ namespace arm {
                     // ASK note sure about predicates, ARM uses `ElemP[esize DIV 4]`
                     auto activated = (GetBitFromLSB(row_pred, 4*row+k) != 0) & (GetBitFromLSB(col_pred, 4*col+k) != 0);
 
-                    auto op1 = GetElementInVectorFromLSB(vec1, 4*row+k, element_size_bits / 4);
+                    NumericType sub_element_size_bits = element_size_bits / 4;
+                    auto op1 = GetElementInVectorFromLSB(vec1, 4*row+k, sub_element_size_bits);
                     op1 = op1_unsigned ? ZExt(op1, element_size_bits) : SExt(op1, element_size_bits);
-                    auto op2 = GetElementInVectorFromLSB(vec2, 4*col+k, element_size_bits / 4);
+                    auto op2 = GetElementInVectorFromLSB(vec2, 4*col+k, sub_element_size_bits);
                     op2 = op2_unsigned ? ZExt(op2, element_size_bits) : SExt(op2, element_size_bits);
                     auto prod = op1 * op2;
                     if (sub_instead_of_add) prod = -prod;
                     sum = Ite(activated, sum + prod, sum); // only updated if active
                 }
+                // update hor_slice with new sum
+                hor_slice = SetElementInVectorFromLSB(hor_slice, col, element_size_bits, sum, Z_REG_WIDTH);
+            }
+            // get new_mem by updating the entire horizontal slice
+            new_mem = _SetTypedHorizontalSlice(new_mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, element_size_bits, hor_slice);
+        }
+        return new_mem;
+    }
+    
+    ExprRef ArmSme::FloatCombineTileWithMatricesK2(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& pred1, const ExprRef& pred2, const NumericType& dest_element_size_bits, const NumericType& src_element_size_bits, bool sub_instead_of_add, const ExprRef& fpzero, const FuncRef& neg_fn, const FuncRef& dotadd_fn) {
+        NumericType dim = Z_REG_WIDTH / dest_element_size_bits;
+        auto new_mem = mem;
+        for (size_t row = 0; row < dim; row++){
+            auto hor_slice = _GetTypedHorizontalSlice(new_mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, dest_element_size_bits);
+            for (size_t col = 0; col < dim; col++){
+                auto prow_0 = (GetBitFromLSB(pred1, 2*row+0) != 0);
+                auto prow_1 = (GetBitFromLSB(pred1, 2*row+1) != 0);
+                auto pcol_0 = (GetBitFromLSB(pred2, 2*col+0) != 0);
+                auto pcol_1 = (GetBitFromLSB(pred2, 2*col+1) != 0);
+
+                auto sum = GetElementInVectorFromLSB(hor_slice, col, dest_element_size_bits);
+                auto erow_0 = Ite(prow_0, GetElementInVectorFromLSB(vec1, 2*row+0, src_element_size_bits), fpzero);
+                auto erow_1 = Ite(prow_1, GetElementInVectorFromLSB(vec1, 2*row+1, src_element_size_bits), fpzero);
+                auto ecol_0 = Ite(pcol_0, GetElementInVectorFromLSB(vec2, 2*col+0, src_element_size_bits), fpzero);
+                auto ecol_1 = Ite(pcol_1, GetElementInVectorFromLSB(vec2, 2*col+1, src_element_size_bits), fpzero);
+
+                if (sub_instead_of_add){ // ASK can i remove the Ite() check?
+                    // only need erow_0 and erow_1 to be negated in this case
+                    erow_0 = Ite(prow_0, neg_fn(erow_0), erow_0);
+                    erow_1 = Ite(prow_1, neg_fn(erow_1), erow_1);
+                }
+                // TODO not sure if predicate logic is right, 'unmodified' is guared by Ite()
+                auto any_active = (prow_0 & pcol_0) | (prow_1 & pcol_1);
+                sum = Ite(any_active, dotadd_fn({sum, erow_0, erow_1, ecol_0, ecol_1}), sum);
+                
+                // update hor_slice with new sum
+                hor_slice = SetElementInVectorFromLSB(hor_slice, col, dest_element_size_bits, sum, Z_REG_WIDTH);
+            }
+            // get new_mem by updating the entire horizontal slice
+            new_mem = _SetTypedHorizontalSlice(new_mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, dest_element_size_bits, hor_slice);
+        }
+        return new_mem;
+    }
+
+    ExprRef ArmSme::FloatCombineTileWithMatricesK1(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& pred1, const ExprRef& pred2, const NumericType& element_size_bits, bool sub_instead_of_add, const FuncRef& neg_fn, const FuncRef& fmac_fn) {
+        NumericType dim = Z_REG_WIDTH / element_size_bits;
+        auto new_mem = mem;
+        for (size_t row = 0; row < dim; row++){
+            auto hor_slice = _GetTypedHorizontalSlice(new_mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, element_size_bits);
+            for (size_t col = 0; col < dim; col++){
+                auto sum = GetElementInVectorFromLSB(hor_slice, col, element_size_bits);
+                auto op1 = GetElementInVectorFromLSB(vec1, row, element_size_bits);
+                auto op2 = GetElementInVectorFromLSB(vec2, col, element_size_bits);
+
+                if (sub_instead_of_add) op1 = neg_fn(op1);
+                auto activated = (GetBitFromLSB(pred1, row) != 0) & (GetBitFromLSB(pred2, col) != 0);
+                sum = Ite(activated, fmac_fn({sum, op1, op2}), sum);
+                
                 // update hor_slice with new sum
                 hor_slice = SetElementInVectorFromLSB(hor_slice, col, element_size_bits, sum, Z_REG_WIDTH);
             }

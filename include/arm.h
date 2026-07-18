@@ -113,8 +113,36 @@ class ArmSme {
     ExprRef Zd; // destination
     ExprRef Zn; // first source
     ExprRef Zm; // second source
+    
+    // NOTE Sort Refs
+    SortRef bf16;
+    SortRef fp64;
+    SortRef fp32;
+    SortRef fp16;
+    
+    // constants
+    ExprRef fp32_zero;
+    ExprRef fp16_zero;
+    ExprRef bf16_zero;
 
-    void InitUninterpretedFunctions();
+    // NOTE Uninterpreted Functions
+    FuncRef fpneg64; // negation (FP64 -> FP64)
+    FuncRef fpneg32; // negation (FP32 -> FP32)
+    FuncRef fpneg16; // negation (FP16 -> FP16)
+    FuncRef bfneg16; // negation (BFloat -> BFloat)
+    
+    // TODO current implementation Ignores FPCR settings passed into DOTADD
+    // Fused Multiply and Accumulate (with no intermediate rounding!)
+    FuncRef fpmac64; // FP64 + FP64 * FP64 -> FP64
+    FuncRef fpmac32; // FP32 + FP32 * FP32 -> FP32
+    
+    // TODO current implementation Ignores FPCR settings passed into DOTADD
+    // Fused Dot Product and Accumulate (with no intermediate rounding!)
+    // usage: DOTADD(old, {a0, b0, a1, b1}) = old + a0 * b0 + a1 * b1
+    FuncRef fpdotadd32to32; // (FP32's @ FP32's) -> FP32
+    FuncRef fpdotadd16to32; // (FP16's @ FP16's) -widened--> FP32
+    FuncRef bfdotadd16to32; // (BFloat's @ BFloat's) -widened--> FP32
+
     void AddInstructions();
 
     // NOTE convert tile_idx into constrained range: 0 to num_tiles-1
@@ -223,9 +251,13 @@ class ArmSme {
     ExprRef CombineTileWithHorizontalVector(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, const ExprRef& is_zero_mode, std::function<ExprRef(ExprRef old, ExprRef extra)> combine_fn);
     ExprRef CombineTileWithVerticalVector(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, const ExprRef& is_zero_mode, std::function<ExprRef(ExprRef old, ExprRef extra)> combine_fn);
 
-    // TODO adapt to floating point
-    ExprRef CombineTileWithMatrices(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, bool sub_instead_of_add, bool op1_unsigned, bool op2_unsigned); // SExt vs ZExt
-
+    // NOTE doesn't need (target|source)_element_size_bits since k<4 is fixed
+    ExprRef IntegerCombineTileWithMatrices(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& pred1, const ExprRef& pred2, const NumericType& element_size_bits, bool sub_instead_of_add, bool op1_unsigned, bool op2_unsigned); // SExt vs ZExt
+    
+    // NOTE dotadd_fn must capture the widening logic from src to dest
+    ExprRef FloatCombineTileWithMatricesK2(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& pred1, const ExprRef& pred2, const NumericType& dest_element_size_bits, const NumericType& src_element_size_bits, bool sub_instead_of_add, const ExprRef& fpzero, const FuncRef& neg_fn, const FuncRef& dotadd_fn);
+    ExprRef FloatCombineTileWithMatricesK1(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& pred1, const ExprRef& pred2, const NumericType& element_size_bits, bool sub_instead_of_add, const FuncRef& neg_fn, const FuncRef& fmac_fn);
+    
   public:
     ArmSme();
     Ila& get() { return m; }
