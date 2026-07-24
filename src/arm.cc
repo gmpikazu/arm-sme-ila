@@ -261,6 +261,7 @@ namespace arm {
     }
     
     ExprRef ArmSme::GetBitFromLSB(const ExprRef& vector, const NumericType& idx) {
+        // TODO could've used Ilang's GetBit function
         return GetElementInVectorFromLSB(vector, idx, 1);
     }
 
