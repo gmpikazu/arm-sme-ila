@@ -183,6 +183,7 @@ namespace arm {
                 auto new_za = FloatCombineTileWithMatricesK2(za, tile_idx, GetVectorRegister(Zn), GetVectorRegister(Zm), GetPredicateRegister(Pn), GetPredicateRegister(Pm), dest_esize, src_esize, sub_op, fpzero, neg_fn, dotadd_fn);
                 instr.SetUpdate(za, new_za);
             };
+            // TODO bf16 and fp16 treated the same
             f("BFMOPA (bf16->fp32)", TEMP_OPCODE, WORD, HALF, constrained(ZAda, WORD), false, bf16_zero, bfneg16, bfdotadd16to32);
             f("BFMOPS (bf16->fp32)", TEMP_OPCODE, WORD, HALF, constrained(ZAda, WORD), true, bf16_zero, bfneg16, bfdotadd16to32);
             f("FMOPA (fp16->fp32)", TEMP_OPCODE, WORD, HALF, constrained(ZAda, WORD), false, fp16_zero, fpneg16, fpdotadd16to32);

@@ -35,9 +35,12 @@ namespace arm {
         Rd(m.NewBvInput("Rd", GPR_ADDR_WIDTH)),
         
         Imm(m.NewBvInput("Imm", 8)), // TODO TBC: what is the maximum bits needed?
-        Imm1(Imm(1, 0)), Imm2((Imm(2, 0))),
-        Imm3(Imm(3, 0)), Imm4(Imm(4, 0)),
-        Imm6(Imm(6, 0)), Imm8(Imm(8, 0)),
+        // BUG Imm(0, 0) is not supported, but we need 1-bit
+        // maybe can model each Imm as different fields
+        // ASK does SelectBit exist? I should've used for step predicate bits then...
+        Imm1(SelectBit(Imm, 0)), Imm2((Imm(1, 0))),
+        Imm3(Imm(2, 0)), Imm4(Imm(3, 0)),
+        Imm6(Imm(5, 0)), Imm8(Imm(7, 0)),
 
         Pg(m.NewBvInput("Pg", P_ADDR_WIDTH)),
         Pd(m.NewBvInput("Pd", P_ADDR_WIDTH)),
@@ -65,10 +68,10 @@ namespace arm {
         fpneg32("fpneg32", fp32, fp32),
         fpneg16("fpneg16", fp16, fp16),
         bfneg16("bfneg16", bf16, bf16),
+        // TODO TBC: check the argument sizes below
         fpmac64("fpmac64", fp64, {fp64, fp64, fp64}),
         fpmac32("fpmac32", fp32, {fp32, fp32, fp32}),
         fpdotadd32to32("fpdotadd32to32", fp32, {fp32, fp32, fp32, fp32, fp32}),
-        // TODO TBC: check the argument sizes below
         fpdotadd16to32("fpdotadd16to32", fp32, {fp32, fp16, fp16, fp16, fp16}),
         bfdotadd16to32("bfdotadd16to32", fp32, {fp32, bf16, bf16, bf16, bf16})
     {

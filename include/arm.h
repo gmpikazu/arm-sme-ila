@@ -39,110 +39,9 @@ namespace arm {
 
 using namespace ilang;
 
-class ArmSme {    
+class ArmSme {
     Ila m;
     
-    // TODO these need more thought
-    // <pstatefield> is encoded in the following
-    // ExprRef Op1;
-    // ExprRef Op2;
-    // ExprRef CRm;
-
-    // <T> is encoded in tszh and tszl or size
-    // ExprRef Tszh;
-    // ExprRef Tszl;
-    // ExprRef Size;
-    
-    // NOTE internal states
-    ExprRef za;
-    ExprRef pstate_sm;
-    ExprRef pstate_za;
-    std::vector<ExprRef> z_regs;
-    std::vector<ExprRef> p_regs; // ASK how many P registers? 8 or 16?
-
-    /** ASK check my understanding
-     * @note there are 31 64-bit GPRs (X0-X30)
-     * @note W registers (32 bit) are lower bits of X registers (64 bit)
-     * @note IMPLEMENTATION: no restriction of which W12-W15 registers to access
-     *       model can freely use any GPR during instruction update
-     * @note zero extension happens when writing to W registers
-     * @note XZR and WZR are zero registers (default value of optional fields)
-     * @note 31-th GPR is either SP (64 bit) or XZR / WZR
-     */
-    ExprRef SP; // 64-bit stack pointer
-    std::vector<ExprRef> GPRs; // X0-X30, W0-W30
-    ExprRef XZR; // 64-bit zero register
-    ExprRef WZR; // 32-bit zero register
-    
-    // NOTE Input States
-    // TODO temporarily use mutually exclusive `cmd` codes for instr select
-    ExprRef cmd;
-
-    // Tile Selector
-    // NOTE instructions MUST CALL ToConstrainedTileIndex() to get tile_idx
-    ExprRef ZAda; // destination tile to accumulate to
-    ExprRef ZAn; // source tile to move out of
-    ExprRef ZAd; // destination tile to move into
-    ExprRef ZAt; // target tile for DRAM load/store
-    ExprRef HV; // horizontal BoolConst(false), vertical BoolConst(true)
-
-    // GPR Names
-    ExprRef Rs; // 32-bit W register (32 lower bits of X register)
-    ExprRef Rv; // 32-bit W register (32 lower bits of X register)
-    ExprRef Rn; // 64-bit X register
-    ExprRef Rm; // 64-bit X register
-    ExprRef Rd; // 64-bit destination register
-    
-    // Immediates (signed or unsigned depends on instruction interpretation)
-    ExprRef Imm;
-    // NOTE Imm is widest, all ImmN's below are lower-N-bits of Imm
-    ExprRef Imm1; // (also known as i1)
-    ExprRef Imm2;
-    ExprRef Imm3;
-    ExprRef Imm4;
-    ExprRef Imm6;
-    ExprRef Imm8;
-    
-    // Predicate Register Names
-    ExprRef Pg; // governing
-    ExprRef Pd; // destination
-    ExprRef Pn; // first source
-    ExprRef Pm; // second source
-    
-    // Scalable Vector Register Names (Z registers)
-    ExprRef Zd; // destination
-    ExprRef Zn; // first source
-    ExprRef Zm; // second source
-    
-    // NOTE Sort Refs
-    SortRef bf16;
-    SortRef fp64;
-    SortRef fp32;
-    SortRef fp16;
-    
-    // constants
-    ExprRef fp32_zero;
-    ExprRef fp16_zero;
-    ExprRef bf16_zero;
-
-    // NOTE Uninterpreted Functions
-    FuncRef fpneg64; // negation (FP64 -> FP64)
-    FuncRef fpneg32; // negation (FP32 -> FP32)
-    FuncRef fpneg16; // negation (FP16 -> FP16)
-    FuncRef bfneg16; // negation (BFloat -> BFloat)
-    
-    // TODO current implementation Ignores FPCR settings passed into DOTADD
-    // Fused Multiply and Accumulate (with no intermediate rounding!)
-    FuncRef fpmac64; // FP64 + FP64 * FP64 -> FP64
-    FuncRef fpmac32; // FP32 + FP32 * FP32 -> FP32
-    
-    // TODO current implementation Ignores FPCR settings passed into DOTADD
-    // Fused Dot Product and Accumulate (with no intermediate rounding!)
-    // usage: DOTADD(old, {a0, b0, a1, b1}) = old + a0 * b0 + a1 * b1
-    FuncRef fpdotadd32to32; // (FP32's @ FP32's) -> FP32
-    FuncRef fpdotadd16to32; // (FP16's @ FP16's) -widened--> FP32
-    FuncRef bfdotadd16to32; // (BFloat's @ BFloat's) -widened--> FP32
-
     void AddInstructions();
 
     // NOTE convert tile_idx into constrained range: 0 to num_tiles-1
@@ -259,6 +158,107 @@ class ArmSme {
     ExprRef FloatCombineTileWithMatricesK1(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& pred1, const ExprRef& pred2, const NumericType& element_size_bits, bool sub_instead_of_add, const FuncRef& neg_fn, const FuncRef& fmac_fn);
     
   public:
+    // TODO these need more thought
+    // <pstatefield> is encoded in the following
+    // ExprRef Op1;
+    // ExprRef Op2;
+    // ExprRef CRm;
+
+    // <T> is encoded in tszh and tszl or size
+    // ExprRef Tszh;
+    // ExprRef Tszl;
+    // ExprRef Size;
+    
+    // NOTE internal states
+    ExprRef za;
+    ExprRef pstate_sm;
+    ExprRef pstate_za;
+    std::vector<ExprRef> z_regs;
+    std::vector<ExprRef> p_regs; // ASK how many P registers? 8 or 16?
+
+    /** ASK check my understanding
+     * @note there are 31 64-bit GPRs (X0-X30)
+     * @note W registers (32 bit) are lower bits of X registers (64 bit)
+     * @note IMPLEMENTATION: no restriction of which W12-W15 registers to access
+     *       model can freely use any GPR during instruction update
+     * @note zero extension happens when writing to W registers
+     * @note XZR and WZR are zero registers (default value of optional fields)
+     * @note 31-th GPR is either SP (64 bit) or XZR / WZR
+     */
+    ExprRef SP; // 64-bit stack pointer
+    std::vector<ExprRef> GPRs; // X0-X30, W0-W30
+    ExprRef XZR; // 64-bit zero register
+    ExprRef WZR; // 32-bit zero register
+    
+    // NOTE Input States
+    // TODO temporarily use mutually exclusive `cmd` codes for instr select
+    ExprRef cmd;
+
+    // Tile Selector
+    // NOTE instructions MUST CALL ToConstrainedTileIndex() to get tile_idx
+    ExprRef ZAda; // destination tile to accumulate to
+    ExprRef ZAn; // source tile to move out of
+    ExprRef ZAd; // destination tile to move into
+    ExprRef ZAt; // target tile for DRAM load/store
+    ExprRef HV; // horizontal BoolConst(false), vertical BoolConst(true)
+
+    // GPR Names
+    ExprRef Rs; // 32-bit W register (32 lower bits of X register)
+    ExprRef Rv; // 32-bit W register (32 lower bits of X register)
+    ExprRef Rn; // 64-bit X register
+    ExprRef Rm; // 64-bit X register
+    ExprRef Rd; // 64-bit destination register
+    
+    // Immediates (signed or unsigned depends on instruction interpretation)
+    ExprRef Imm;
+    // NOTE Imm is widest, all ImmN's below are lower-N-bits of Imm
+    ExprRef Imm1; // (also known as i1)
+    ExprRef Imm2;
+    ExprRef Imm3;
+    ExprRef Imm4;
+    ExprRef Imm6;
+    ExprRef Imm8;
+    
+    // Predicate Register Names
+    ExprRef Pg; // governing
+    ExprRef Pd; // destination
+    ExprRef Pn; // first source
+    ExprRef Pm; // second source
+    
+    // Scalable Vector Register Names (Z registers)
+    ExprRef Zd; // destination
+    ExprRef Zn; // first source
+    ExprRef Zm; // second source
+    
+    // NOTE Sort Refs
+    SortRef bf16;
+    SortRef fp64;
+    SortRef fp32;
+    SortRef fp16;
+    
+    // constants
+    ExprRef fp32_zero;
+    ExprRef fp16_zero;
+    ExprRef bf16_zero;
+
+    // NOTE Uninterpreted Functions
+    FuncRef fpneg64; // negation (FP64 -> FP64)
+    FuncRef fpneg32; // negation (FP32 -> FP32)
+    FuncRef fpneg16; // negation (FP16 -> FP16)
+    FuncRef bfneg16; // negation (BFloat -> BFloat)
+    
+    // TODO current implementation Ignores FPCR settings passed into DOTADD
+    // Fused Multiply and Accumulate (with no intermediate rounding!)
+    FuncRef fpmac64; // FP64 + FP64 * FP64 -> FP64
+    FuncRef fpmac32; // FP32 + FP32 * FP32 -> FP32
+    
+    // TODO current implementation Ignores FPCR settings passed into DOTADD
+    // Fused Dot Product and Accumulate (with no intermediate rounding!)
+    // usage: DOTADD(old, {a0, b0, a1, b1}) = old + a0 * b0 + a1 * b1
+    FuncRef fpdotadd32to32; // (FP32's @ FP32's) -> FP32
+    FuncRef fpdotadd16to32; // (FP16's @ FP16's) -widened--> FP32
+    FuncRef bfdotadd16to32; // (BFloat's @ BFloat's) -widened--> FP32
+
     ArmSme();
     Ila& get() { return m; }
 };
