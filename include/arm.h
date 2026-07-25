@@ -21,7 +21,8 @@ namespace arm {
     #define DOUBLE 64
     #define QUAD 128
 
-    constexpr NumericType SVL = 128;
+    // NOTE current unit tests assume SVL = 128, since we constrain only 128 bits
+    constexpr NumericType SVL = 128; 
     constexpr NumericType SVL_B = SVL / BYTE;
     const NumericType LOG2_SVL_B = std::log2(SVL_B);
     constexpr NumericType GPR_COUNT = 31;
@@ -175,6 +176,10 @@ class ArmSme {
     ExprRef pstate_za;
     std::vector<ExprRef> z_regs;
     std::vector<ExprRef> p_regs; // ASK how many P registers? 8 or 16?
+    
+    // PUBLIC convenience helpers for testing tile slices
+    ExprRef GetHorizontalSlice(const ExprRef& mem, int tile_idx, int row_idx, const NumericType& element_size_bits);
+    ExprRef GetVerticalSlice(const ExprRef& mem, int tile_idx, int col_idx, const NumericType& element_size_bits);
 
     /** ASK check my understanding
      * @note there are 31 64-bit GPRs (X0-X30)

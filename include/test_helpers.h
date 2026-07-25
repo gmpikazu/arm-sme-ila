@@ -63,14 +63,31 @@ void record_failure(const std::string& msg);
 // step defaults to step 0 (initial step)
 void cstr_step_bool(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const ilang::ExprRef &ila_expr, bool value, int step=0);
 void cstr_step_int(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const ilang::ExprRef &ila_expr, int value, int step=0);
-// NOTE only supports 64 bit length, for bigger lengths just use cstr_step and ctx.bv_val() manually
+// NOTE only supports 64 bit length, for bigger lengths just use cstr_step and ctx.concat(bv_val(),bv_val()) manually
 void cstr_step_bv(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const ilang::ExprRef &ila_expr, uint64_t value, size_t bit_width, int step=0);
 void cstr_step(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const ilang::ExprRef &ila_expr, const z3::expr &value_expr, int step=0);
 // --------------------------------------------------------------
 
+// --------------------------------------------------------------
+// ZA tile helper functions
+// --------------------------------------------------------------
+// Create a 128-bit Z3 expression from two 64-bit halves
+// Z3's ctx.bv_val only supports up to 64-bit, so we need this helper
+z3::expr bv_val_128(z3::context &ctx, uint64_t high_half, uint64_t low_half);
+z3::expr bv_val(z3::context &ctx, std::vector<uint64_t> values);
+
+// Get byte at specific row and column in ZA tile (row-major internal storage)
+// row, col: 0-indexed, range [0, SVL_B-1] = [0, 15]
+ilang::ExprRef GetByteAtRowCol(ArmSme& sme, int row, int col);
+
+// Print ZA in a formatted ASCII table (dark mode friendly)
+// step parameter allows inspection at any timestep (default: step 0)
+// Format: row 0 at top, column 0 at left, each cell shows hex value
+void PrintZaCsv(z3::model &mdl, ilang::IlaZ3Unroller &u, ArmSme& sme, int step=0);
+
 // PRINT function
 // @brief prints ila_expr in human-readable format
-void PRINT(const ilang::ExprRef &ila_expr, int step, ilang::IlaZ3Unroller &u);
+void PRINT(const ilang::ExprRef &ila_expr, int step, ilang::IlaZ3Unroller &u, z3::model &mdl, std::string label = "");
 
 // CHECK function
 // @brief handles instruction lookup by name, unroll, timeout, solving, error

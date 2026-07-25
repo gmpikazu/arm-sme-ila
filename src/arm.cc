@@ -194,6 +194,15 @@ namespace arm {
         return Ite(is_vertical, _GetTypedVerticalSlice(mem, slice_idx, tile_idx, element_size_bits), _GetTypedHorizontalSlice(mem, slice_idx, tile_idx, element_size_bits));
     }
     
+    // PUBLIC convenience helpers for testing
+    ExprRef ArmSme::GetHorizontalSlice(const ExprRef& mem, int tile_idx, int row_idx, const NumericType& element_size_bits) {
+        return GetTypedSlice(mem, BoolConst(false), BvConst(tile_idx, ZA_ADDR_WIDTH), BvConst(row_idx, ZA_ADDR_WIDTH), element_size_bits);
+    }
+    
+    ExprRef ArmSme::GetVerticalSlice(const ExprRef& mem, int tile_idx, int col_idx, const NumericType& element_size_bits) {
+        return GetTypedSlice(mem, BoolConst(true), BvConst(tile_idx, ZA_ADDR_WIDTH), BvConst(col_idx, ZA_ADDR_WIDTH), element_size_bits);
+    }
+    
     // NOTE Topmost row is index 0
     ExprRef ArmSme::_SetTypedHorizontalSlice(const ExprRef& mem, const ExprRef& row_idx, const ExprRef& tile_idx, const NumericType& element_size_bits, const ExprRef& data) {
         // dim x dim elements in tile

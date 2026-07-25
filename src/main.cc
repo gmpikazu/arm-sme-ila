@@ -33,14 +33,17 @@ void list_states(ArmSme& sme) {
 
 int main() {
     ArmSme sme;
-
+    
     // list everything
     list_instrs(sme);
     // list_states(sme);
     
     // instruction unit tests
+    // test_quick(sme);
     // test_pstate(sme);
-    test_zero_mova(sme);
+    // test_slice_helper(sme);
+    // test_zero(sme);
+    test_mova(sme);
     
     // summary
     print_test_summary();

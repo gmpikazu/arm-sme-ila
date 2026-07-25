@@ -1,4 +1,5 @@
 #include <iostream>
+#include <iomanip>
 #include "../include/test_helpers.h"
 #include "../include/arm.h"
 
@@ -42,10 +43,95 @@ void cstr_step(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const i
     s.add(expr == value_expr);
 }
 
-void PRINT(const ilang::ExprRef &ila_expr, int step, ilang::IlaZ3Unroller &u) {
+// --------------------------------------------------------------
+// ZA tile helper functions
+// --------------------------------------------------------------
+// Create a 128-bit Z3 expression from two 64-bit halves
+z3::expr bv_val_128(z3::context &ctx, uint64_t high_half, uint64_t low_half) {
+    return z3::concat(ctx.bv_val(high_half, 64), ctx.bv_val(low_half, 64));
+}
+
+// Turns array of 64-bit hexadecimal into a bigger one through concatenation
+// values[0] becomes MSB
+z3::expr bv_val(z3::context &ctx, std::vector<uint64_t> values) {
+    assert(values.size() != 0);
+    auto expr = ctx.bv_val(values[0], 64);
+    for (size_t i = 1; i < values.size(); i++) {
+        expr = z3::concat(expr, ctx.bv_val(values[i], 64));
+    }
+    return expr;
+}
+
+// Get byte at specific row and column in ZA tile
+ilang::ExprRef GetByteAtRowCol(ArmSme& sme, int row, int col) {
+    // ZA linear memory layout: row-major, each row = SVL_B bytes
+    // address = row * SVL_B + col
+    return Load(sme.za, BvConst(row * SVL_B + col, sme.za.addr_width()));
+}
+
+// Print ZA in a formatted ASCII table (dark mode friendly)
+void PrintZaCsv(z3::model &mdl, ilang::IlaZ3Unroller &u, ArmSme& sme, int step) {
+    const int cell_width = 3; // includes '\0'
+    
+    std::cout << "┌";
+    for (size_t col = 0; col < SVL_B; col++) {
+        std::cout << std::string(cell_width, '-');
+    }
+    std::cout << "─┐" << std::endl;
+    int step_len = std::to_string(step).length();
+    int spaces = 16 * cell_width - 38 - step_len; // pad to align right border
+    std::cout << "│ ZA TILE MEMORY LAYOUT (16x16) - Step " << step << " ";
+    std::cout << std::string(spaces, ' ') << "│" << std::endl;
+    std::cout << "├";
+    for (size_t col = 0; col < SVL_B; col++) {
+        std::cout << std::string(cell_width, '-');
+    }
+    std::cout << "─┤" << std::endl;
+    
+    // Print column headers
+    std::cout << "│";
+    for (size_t col = 0; col < SVL_B; col++) {
+        std::cout << std::setw(cell_width) << std::right << col;
+    }
+    std::cout << " │" << std::endl;
+    std::cout << "├";
+    for (size_t col = 0; col < SVL_B; col++) {
+        std::cout << std::string(cell_width, '-');
+    }
+    std::cout << "─┤" << std::endl;
+    
+    // Print each row
+    for (size_t row = 0; row < SVL_B; row++) {
+        std::cout << "│ ";
+        for (size_t col = 0; col < SVL_B; col++) {
+            size_t addr = row * SVL_B + col;
+            auto byte_expr = Load(sme.za, BvConst(addr, sme.za.addr_width()));
+            auto byte_val = mdl.eval(u.GetZ3Expr(byte_expr, step)).to_string();
+            
+            // Remove #x prefix if present
+            if (byte_val.size() > 2 && byte_val.substr(0, 2) == "#x") {
+                byte_val = byte_val.substr(2);
+            }
+            
+            // without prefix
+            std::cout << std::setw(2) << std::setfill('0') << std::uppercase << byte_val << " ";
+            std::cout << std::setfill(' ');
+        }
+        std::cout << "│ R" << std::setw(2) << std::left << row << " " << std::endl;;
+    }
+    
+    std::cout << "└";
+    for (size_t col = 0; col < SVL_B; col++) {
+        std::cout << std::string(cell_width, '-');
+    }
+    std::cout << "─┘" << std::endl;
+}
+
+void PRINT(const ilang::ExprRef &ila_expr, int step, ilang::IlaZ3Unroller &u, z3::model &mdl, std::string label) {
     static size_t counter = 0;
     auto expr = u.GetZ3Expr(ila_expr, step);
-    std::cout << " LOG[" << counter++ << "]" << expr.to_string() << std::endl;
+    auto eval = mdl.eval(expr);
+    std::cout << " LOG[" << counter++ << "] '" << label << "' "<< eval.to_string() << std::endl;
 }
 
 void CHECK(const std::string& test_name, ArmSme& sme, const std::vector<std::string>& instr_names,
