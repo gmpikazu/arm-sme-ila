@@ -39,7 +39,7 @@ namespace arm {
                 auto source = GetTypedSlice(za, HV, tile_idx, slice_idx, esize);
                 auto dest = GetVectorRegister(Zd);
                 auto masked = MaskWithSinglePredicate(source, dest, esize, SVL, GetPredicateRegister(Pg), BoolConst(false));
-                UpdateSingleVectorRegister(instr, Zn, masked);
+                UpdateSingleVectorRegister(instr, Zd, masked);
             };
             f(TEMP_OPCODE, BYTE, ".B", constrained(ZAn, BYTE), Imm4);
             f(TEMP_OPCODE, HALF, ".H", constrained(ZAn, HALF), Imm3);

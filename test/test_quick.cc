@@ -18,12 +18,12 @@ void test_quick(ArmSme& sme) {
             auto hor_slice = sme.GetHorizontalSlice(sme.za, 0, 0, BYTE);
             
             std::cout << "\n=== Step 0 (before ZERO) ===" << std::endl;
-            PrintZaCsv(mdl, u, sme, 0);
+            PrintZa(mdl, u, sme, 0);
             // Show evaluated value instead of symbolic expression
             PRINT(hor_slice, 0, u, mdl, "before ZERO");
             
             std::cout << "\n=== Step 1 (after ZERO) ===" << std::endl;
-            PrintZaCsv(mdl, u, sme, 1); 
+            PrintZa(mdl, u, sme, 1); 
             // Show evaluated value instead of symbolic expression
             PRINT(hor_slice, 1, u, mdl, "after ZERO");
         }

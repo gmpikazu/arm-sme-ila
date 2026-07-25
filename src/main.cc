@@ -41,6 +41,7 @@ int main() {
     // instruction unit tests
     // test_quick(sme);
     // test_pstate(sme);
+    test_cstr_helper(sme);
     // test_slice_helper(sme);
     // test_zero(sme);
     test_mova(sme);

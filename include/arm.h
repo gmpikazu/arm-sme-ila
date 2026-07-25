@@ -176,10 +176,6 @@ class ArmSme {
     ExprRef pstate_za;
     std::vector<ExprRef> z_regs;
     std::vector<ExprRef> p_regs; // ASK how many P registers? 8 or 16?
-    
-    // PUBLIC convenience helpers for testing tile slices
-    ExprRef GetHorizontalSlice(const ExprRef& mem, int tile_idx, int row_idx, const NumericType& element_size_bits);
-    ExprRef GetVerticalSlice(const ExprRef& mem, int tile_idx, int col_idx, const NumericType& element_size_bits);
 
     /** ASK check my understanding
      * @note there are 31 64-bit GPRs (X0-X30)
@@ -266,6 +262,18 @@ class ArmSme {
 
     ArmSme();
     Ila& get() { return m; }
+    
+    // public helper functions for tile slices
+    ExprRef GetHorizontalSlice(const ExprRef& mem, int tile_idx, int row_idx, const NumericType& element_size_bits);
+    ExprRef GetVerticalSlice(const ExprRef& mem, int tile_idx, int col_idx, const NumericType& element_size_bits);
+    
+    // returns all byte addresses that would be touched by the given slice
+    std::vector<size_t> GetSliceAddresses(int tile_idx, int slice_idx, bool is_vertical, const NumericType& element_size_bits);
+
+    ExprRef GetVectorRegister(size_t z_idx);
+    ExprRef GetPredicateRegister(size_t p_idx);
+    ExprRef Get32BitGPR(size_t w_idx); // for W register access
+    ExprRef Get64BitGPR(size_t x_idx, bool use_sp=false); // for X register access
 };
 
 }  // namespace arm

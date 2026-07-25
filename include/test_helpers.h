@@ -83,7 +83,15 @@ ilang::ExprRef GetByteAtRowCol(ArmSme& sme, int row, int col);
 // Print ZA in a formatted ASCII table (dark mode friendly)
 // step parameter allows inspection at any timestep (default: step 0)
 // Format: row 0 at top, column 0 at left, each cell shows hex value
-void PrintZaCsv(z3::model &mdl, ilang::IlaZ3Unroller &u, ArmSme& sme, int step=0);
+void PrintZa(z3::model &mdl, ilang::IlaZ3Unroller &u, ArmSme& sme, int step=0);
+
+// Constrain a slice (horizontal or vertical) to a value and automatically zero all other ZA bytes
+// This handles Z3 model completion by ensuring unconstrained bytes show as 0x00
+// and automatically computes the slice expression internally to constrain it
+void cstr_step_slice(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, ArmSme& sme,
+                     const z3::expr &value_expr,
+                     int tile_idx, int slice_idx, bool is_vertical, const ilang::NumericType& element_size_bits,
+                     int step=0);
 
 // PRINT function
 // @brief prints ila_expr in human-readable format

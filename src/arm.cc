@@ -202,7 +202,7 @@ namespace arm {
     ExprRef ArmSme::GetVerticalSlice(const ExprRef& mem, int tile_idx, int col_idx, const NumericType& element_size_bits) {
         return GetTypedSlice(mem, BoolConst(true), BvConst(tile_idx, ZA_ADDR_WIDTH), BvConst(col_idx, ZA_ADDR_WIDTH), element_size_bits);
     }
-    
+   
     // NOTE Topmost row is index 0
     ExprRef ArmSme::_SetTypedHorizontalSlice(const ExprRef& mem, const ExprRef& row_idx, const ExprRef& tile_idx, const NumericType& element_size_bits, const ExprRef& data) {
         // dim x dim elements in tile
@@ -324,7 +324,7 @@ namespace arm {
         }
         return expr;
     }
-    
+
     void ArmSme::UpdateSingleVectorRegister(InstrRef& instr, const ExprRef& z_idx, const ExprRef& val) {
         if (val.bit_width() != Z_REG_WIDTH) throw std::runtime_error("UpdateSingleVectorRegister(): val's bit-width must match Z_REG_WIDTH");
         assert(z_idx.bit_width() <= Z_ADDR_WIDTH);
@@ -533,5 +533,57 @@ namespace arm {
         }
         return new_mem;
     }
+    
+    std::vector<size_t> ArmSme::GetSliceAddresses(int tile_idx, int slice_idx, bool is_vertical, const NumericType& element_size_bits) {
+        std::vector<size_t> addresses;
+        NumericType dim = SVL / element_size_bits;
+        NumericType num_tiles = SVL_B / dim;
+        int element_size_bytes = element_size_bits / BYTE;
+        
+        if (is_vertical) {
+            // ARM SME: col_idx % dim (required by ARM)
+            int wrapped_col_idx = (dim == 1) ? 0 : (slice_idx & (dim - 1)); // & (dim-1) fast modulo
+            int col = (SVL_B - element_size_bytes) - (wrapped_col_idx * element_size_bytes);
+            
+            for (size_t i = 0; i < dim; i++) {
+                size_t row = tile_idx + i * num_tiles;
+                size_t base_addr = row * SVL_B + col;
+                for (int b = 0; b < element_size_bytes; b++) {
+                    addresses.push_back(base_addr + b);
+                }
+            }
+        } else {
+            // ARM SME: row_idx % dim (required by ARM)
+            int wrapped_row_idx = (dim == 1) ? 0 : (slice_idx & (dim - 1)); // & (dim-1) fast modulo
+            size_t row = tile_idx + wrapped_row_idx * num_tiles;
+            
+            for (size_t col = 0; col < SVL_B; col++) {
+                addresses.push_back(row * SVL_B + col);
+            }
+        }
+        return addresses;
+    }
+    
+    ExprRef ArmSme::GetVectorRegister(size_t z_idx) {
+        assert(z_idx < Z_REG_COUNT);
+        return z_regs[z_idx];
+    }
 
+    ExprRef ArmSme::GetPredicateRegister(size_t p_idx) {
+        assert(p_idx < P_REG_COUNT);
+        return p_regs[p_idx];
+    }
+    
+    ExprRef ArmSme::Get32BitGPR(size_t w_idx) {
+        assert(w_idx < GPR_COUNT);
+        if (w_idx == 31) { return WZR; }
+        else { return Extract(GPRs[w_idx], 31, 0); }
+    }
+
+    ExprRef ArmSme::Get64BitGPR(size_t x_idx, bool use_sp) {
+        assert(x_idx < GPR_COUNT);
+        if (x_idx == 31) { return use_sp ? SP : XZR; }
+        else { return GPRs[x_idx]; }
+    }
+ 
 }  // namespace arm

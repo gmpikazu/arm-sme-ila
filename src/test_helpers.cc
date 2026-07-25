@@ -17,7 +17,6 @@ void record_failure(const std::string& msg) {
 // Helper to constrain an ILA state variable at a specific step
 // Call AFTER unrolling, adds constraint directly to solver
 // step defaults to step 0 (initial step)
-// --------------------------------------------------------------
 // Bool
 void cstr_step_bool(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const ilang::ExprRef &ila_expr, bool value, int step) {
     auto expr = u.GetZ3Expr(ila_expr, step);
@@ -43,9 +42,6 @@ void cstr_step(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const i
     s.add(expr == value_expr);
 }
 
-// --------------------------------------------------------------
-// ZA tile helper functions
-// --------------------------------------------------------------
 // Create a 128-bit Z3 expression from two 64-bit halves
 z3::expr bv_val_128(z3::context &ctx, uint64_t high_half, uint64_t low_half) {
     return z3::concat(ctx.bv_val(high_half, 64), ctx.bv_val(low_half, 64));
@@ -69,8 +65,8 @@ ilang::ExprRef GetByteAtRowCol(ArmSme& sme, int row, int col) {
     return Load(sme.za, BvConst(row * SVL_B + col, sme.za.addr_width()));
 }
 
-// Print ZA in a formatted ASCII table (dark mode friendly)
-void PrintZaCsv(z3::model &mdl, ilang::IlaZ3Unroller &u, ArmSme& sme, int step) {
+// Print ZA in a formatted ASCII table
+void PrintZa(z3::model &mdl, ilang::IlaZ3Unroller &u, ArmSme& sme, int step) {
     const int cell_width = 3; // includes '\0'
     
     std::cout << "┌";
@@ -125,6 +121,43 @@ void PrintZaCsv(z3::model &mdl, ilang::IlaZ3Unroller &u, ArmSme& sme, int step) 
         std::cout << std::string(cell_width, '-');
     }
     std::cout << "─┘" << std::endl;
+}
+
+void InitZaToZero(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, ArmSme& sme, int step) {
+    for (size_t addr = 0; addr < ZA_BYTE_SIZE; addr++) {
+        auto byte_expr = Load(sme.za, BvConst(addr, sme.za.addr_width()));
+        cstr_step_bv(s, u, ctx, byte_expr, 0x00, BYTE, step);
+    }
+}
+
+void cstr_step_slice(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, ArmSme& sme,
+                     const z3::expr &value_expr,
+                     int tile_idx, int slice_idx, bool is_vertical, const ilang::NumericType& element_size_bits,
+                     int step) {
+    // get all addresses touched by this slice
+    auto touched_addrs = sme.GetSliceAddresses(tile_idx, slice_idx, is_vertical, element_size_bits);
+    // zero all bytes NOT touched by the slice
+    for (size_t addr = 0; addr < ZA_BYTE_SIZE; addr++) {
+        bool is_touched = false;
+        for (size_t touched_addr : touched_addrs) {
+            if (addr == touched_addr) {
+                is_touched = true;
+                break;
+            }
+        }
+        if (!is_touched) {
+            auto byte_expr = Load(sme.za, BvConst(addr, sme.za.addr_width()));
+            cstr_step_bv(s, u, ctx, byte_expr, 0x00, BYTE, step);
+        }
+    }
+    // compute the slice expression internally and constrain it
+    if (is_vertical) {
+        auto slice_expr = sme.GetVerticalSlice(sme.za, tile_idx, slice_idx, element_size_bits);
+        cstr_step(s, u, ctx, slice_expr, value_expr, step);
+    } else {
+        auto slice_expr = sme.GetHorizontalSlice(sme.za, tile_idx, slice_idx, element_size_bits);
+        cstr_step(s, u, ctx, slice_expr, value_expr, step);
+    }
 }
 
 void PRINT(const ilang::ExprRef &ila_expr, int step, ilang::IlaZ3Unroller &u, z3::model &mdl, std::string label) {
