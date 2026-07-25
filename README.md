@@ -1,37 +1,27 @@
 # Project Plan
-## Remaining Modelling Tasks
-- Load store DRAM, floating point instructions, SVE2 instructions, <T> field
-## Crucial Clarification (ask in meeting)
-- How to verify that the ILA is correct?
-- How to model DRAM memory, because we need to agree on the memory model to prove between Gemmini and ARM SME (maybe use uninterpreted functions)
-    - To implement `LD`, `ST` for each data type
-- How to deal with different float types, widening, and arithmetic (signed & unsigned)
-    - To implement sum, outer product, and other operations
-- What is the length of the `Imm` field, it differs based on instruction it seems
-- How many predicate registers do we need to have?
-- `esize` is baked into opcode, and we use lambdas for .B .H .W .D .Q suffixes, right?
-- Must `ZA0` single choice tile access be independent instruction? I handled it with the `if(dim==1)` check already though before doing `log2(dim)`
-- Untyped data type instruction how to encode and operate
-## Next Steps
-- Helper that takes two vectors and `esize`, returns a new vector that combines the two vectors using a Lambda `combine()` function: `add`, `sub`, `accumulate`
-    - For outer products, sums, accumulate, etc
-- Agreement on how to model general purpose DRAM memory for `LD`, `ST` instructions
-- Mov (alias), Mova, Ld, St, Ldr, Str, Zero instructions
+## Remaining Tasks
+- Model load store DRAM (using UFs), SVE2 instructions using <T> field
+- Verify instructions by constructing unit tests, then integration tests (eg., {ZERO, MOVA, SMOPA})
 ## Delayed Simple Tasks
 - `SMSSTART/STOP` on/off zeroing behavior (B1.1.1 and E2 pseudocode of SM,ZA states)
-- `Ws+imm` slice index
-- Use asserts instead of `if` and `switch` for program guarantee
+- Use `assert`s instead of `if` and `switch` for program invariants
 - Remove `merge` and `zero` mode `ExprRef` selection if Z3 takes too long
 - `Z_REG_WIDTH` and `SVL` scattered around code but they are same thing
 ## Delayed Complex Tasks
-- Floating point
-- Outer products and sums
+- Floating point IEEE behavior, maybe no need since we replaced FP with Uninterpreted Functions
+- Bfloat16 and Fp16 are treated as the same thing in ILAng because bit-widths are equal (not a problem at the moment)
 ## Random Questions
 - Does ILAng use 2's complement natively for operator overloads?
 - How do I know if a comparison operator overload is signed or unsigned?
+## Hardcoded Things To Generalize Later
+- `PrintZa` prints 16x16 matrix
+    - Need check the alignement issue and make sure the printing is accurate for larger `SVL_B`
+- All unit tests constrain a 128-bit vector
+    - Need to create generalized `bv_ones(size)`, `bv_zeros(size)` that fills `size` bits with 1 or 0 respectively
+    - Also need `bv_sequence(size)` that fills `0x00`, ..., `0xff` up to `size` bits
 
 # Implementation Overview
-This document is aimed to provide viewers with a overview of the lower-level implementation specifics of this project
+This document is aimed to provide viewers with an overview of the implementation specifics of this project
 ## Code Conventions
 - Widths and sizes are given in bits (eg., `SVL`, `BYTE`, `HALF`)
 - `UpdateSingle`-prefixed functions perform `instr.SetUpdate()` internally so **does not** support updating multiple changes at once (use lower-level helpers instead)
@@ -56,3 +46,7 @@ This document is aimed to provide viewers with a overview of the lower-level imp
 - ARM SME supports `/M` (merge mode), destination element is unmodified if source element is not activated by predicate bit, and `/Z` (zero mode), destination element is zeroed out instead when source element is not activated by predicate bit
 - Predicate registers contain `SVL_B` bits and `bit[i]` controls activation of `vector.elem[i]` where an element can occupy `esize` bits (eg., `BYTE`, `HALF`, etc)
 - The implementation extracts bits starting from LSB, higher order bits are ignored when we have iterated over `num_elements` bits
+
+## Preventing Z3 Garbage Initialization
+- Explicitly constrain all values to prevent Z3 populating them with garbage
+- For ZA, this was done through `cstr_step_slice()` where all untouched addresses are explicitly set to `0x00` to clean up `PrintZa()`'s output for easier empirical verification
