@@ -55,9 +55,9 @@ namespace arm {
                 
                 auto slice_idx = BaseRegPlusImm(Get32BitGPR(Rs), imm);
                 auto source = GetVectorRegister(Zn);
-                auto dest = GetTypedSlice(za, HV, tile_idx, slice_idx, BYTE);
-                auto masked = MaskWithSinglePredicate(source, dest, BYTE, SVL, GetPredicateRegister(Pn), BoolConst(false));
-                UpdateSingleTypedSlice(instr, HV, tile_idx, slice_idx, BYTE, masked);
+                auto dest = GetTypedSlice(za, HV, tile_idx, slice_idx, esize);
+                auto masked = MaskWithSinglePredicate(source, dest, esize, SVL, GetPredicateRegister(Pg), BoolConst(false));
+                UpdateSingleTypedSlice(instr, HV, tile_idx, slice_idx, esize, masked);
             };
             f(TEMP_OPCODE, BYTE, ".B", constrained(ZAd, BYTE), Imm4);
             f(TEMP_OPCODE, HALF, ".H", constrained(ZAd, HALF), Imm3);

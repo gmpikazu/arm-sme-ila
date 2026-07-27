@@ -95,7 +95,7 @@ void test_slice_helper(ArmSme& sme) {
 }
 
 void test_mova(ArmSme& sme) {
-    CHECK("MOVA_T2V.S (tile to vector) move ZA3V.S[1] to Z[10] using P[5] and W[2]", sme, {"MOVA_T2V.S"},
+    CHECK("MOVA_T2V.S (tile to vector) move ZA3V.S[1] to Z[10] using P[5] (only first and third element)", sme, {"MOVA_T2V.S"},
         [&](IlaZ3Unroller &u, z3::solver &s, z3::context &ctx) {
             // constrain target vertical slice (ZA3V.S[1])
             cstr_step_slice(s, u, ctx, sme, bv_val_128(ctx, 0x1111111122222222ULL, 0x3333333344444444ULL), 3, 1, true, WORD);
@@ -103,13 +103,19 @@ void test_mova(ArmSme& sme) {
             cstr_step_bv(s, u, ctx, sme.Zd, 10ULL, sme.Zd.bit_width());
             // constrain the predicate reg and its value
             cstr_step_bv(s, u, ctx, sme.Pg, 5ULL, sme.Pg.bit_width());
-            cstr_step(s, u, ctx, sme.p_regs[5], ctx.bv_val(-1, P_REG_WIDTH)); // all zeroes
+
+            cstr_step_bv(s, u, ctx, sme.p_regs[5], 0x5ULL, P_REG_WIDTH); // only first and third element
+            // cstr_step(s, u, ctx, sme.p_regs[5], ctx.bv_val(-1, P_REG_WIDTH)); // all ones
+            
             // constrain tile selection, tile_idx == 3
             cstr_step_bv(s, u, ctx, sme.ZAn, 3ULL, sme.ZAn.bit_width());
             cstr_step_bool(s, u, ctx, sme.HV, true); // vertical == true
             // constrain slice index by fixing W[2] and Imm, col_idx == 1
             cstr_step_bv(s, u, ctx, sme.Rs, 2ULL, sme.Rs.bit_width());
-            cstr_step(s, u, ctx, sme.Get32BitGPR(2), ctx.bv_val(0, 32));
+
+            cstr_step_bv(s, u, ctx, sme.Get32BitGPR(2), 0ULL, 32); // NOTE equivalent with below
+            // cstr_step(s, u, ctx, sme.Get32BitGPR(2), ctx.bv_val(0, 32));
+            
             cstr_step_bv(s, u, ctx, sme.Imm, 1ULL, sme.Imm.bit_width());
         },
         [&](z3::model &mdl, IlaZ3Unroller &u) {
@@ -121,14 +127,33 @@ void test_mova(ArmSme& sme) {
             PRINT(sme.z_regs[10], 1, u, mdl, "Z reg after MOVA_T2V.S");
             std::string ver_slice_eval = mdl.eval(ver_slice).to_string();
             std::string z_reg_val_eval = mdl.eval(z_reg_val).to_string();
-            EXPECT_TRUE(ver_slice_eval == z_reg_val_eval);
+            // EXPECT_TRUE(ver_slice_eval == z_reg_val_eval); // only if predicate was all ones
+            EXPECT_TRUE(z_reg_val_eval == "#x00000000222222220000000044444444");
         }
     );
 
-    CHECK("", sme, {""},
+    CHECK("MOVA_V2T.D (vector to tile) move Z[10] to ZA7V.D[1] using P[2]", sme, {"MOVA_V2T.D"},
         [&](IlaZ3Unroller &u, z3::solver &s, z3::context &ctx) {
+            InitZaToZero(s, u, ctx, sme);
+            cstr_step_bv(s, u, ctx, sme.ZAd, 7ULL, sme.ZAd.bit_width()); // ZA tile 7
+            cstr_step_bool(s, u, ctx, sme.HV, true); // vertical
+            cstr_step_bv(s, u, ctx, sme.Rs, 3ULL, sme.Rs.bit_width()); // W[3]
+            cstr_step_bv(s, u, ctx, sme.Get32BitGPR(3), 0ULL, 32); // W[3] == all zeroes
+            cstr_step_bv(s, u, ctx, sme.Imm1, 1ULL, sme.Imm1.bit_width()); // slice 1, leftmost
+            cstr_step_bv(s, u, ctx, sme.Pg, 2ULL, sme.Pg.bit_width()); // P[2]
+            cstr_step(s, u, ctx, sme.p_regs[2], ctx.bv_val(-1, P_REG_WIDTH)); // all ones
+            cstr_step_bv(s, u, ctx, sme.Zn, 10ULL, sme.Zn.bit_width()); // Z[10]
+            cstr_step(s, u, ctx, sme.z_regs[10], bv_val_128(ctx, 0x1111111122222222ULL, 0x3333333344444444ULL)); // populate the source vector register
         },
         [&](z3::model &mdl, IlaZ3Unroller &u) {
+            PRINT(sme.z_regs[10], 0, u, mdl, "Z[10] at step 0");
+            PrintZa(mdl, u, sme, 0);
+            std::cout << " ZA updated to contain Z[10] vertically\n";
+            PrintZa(mdl, u, sme, 1);
+            auto ver_slice = sme.GetVerticalSlice(sme.za, 7, 1, DOUBLE);
+            std::string eval = mdl.eval(u.GetZ3Expr(ver_slice, 1)).to_string();
+            PRINT(ver_slice, 1, u, mdl, "ZA7V.D[1] vertical slice at step 1");
+            EXPECT_TRUE(eval == "#x11111111222222223333333344444444");
         }
     );
 

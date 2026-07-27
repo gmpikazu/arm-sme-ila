@@ -47,6 +47,13 @@ This document is aimed to provide viewers with an overview of the implementation
 - Predicate registers contain `SVL_B` bits and `bit[i]` controls activation of `vector.elem[i]` where an element can occupy `esize` bits (eg., `BYTE`, `HALF`, etc)
 - The implementation extracts bits starting from LSB, higher order bits are ignored when we have iterated over `num_elements` bits
 
+## Instruction Unit Testing
+- Specify a vector of instructions to `UnrollPathConn()`
+- This unrolls transitions and constraints where:
+    1. The conditions to make each particular instruction decode **is automatically generated**
+    2. The instructions in the list run one after another forming a connected transition path
+- Observation: if we manually constrain `pstate_sm` or `pstate_za` to false before our SME instruction is supposed to execute, Z3 **cannot auto-generate** conditions to make `SME_ON=true` so, returns `unsat` because instruction can't decode
+
 ## Preventing Z3 Garbage Initialization
 - Explicitly constrain all values to prevent Z3 populating them with garbage
 - For ZA, this was done through `cstr_step_slice()` where all untouched addresses are explicitly set to `0x00` to clean up `PrintZa()`'s output for easier empirical verification

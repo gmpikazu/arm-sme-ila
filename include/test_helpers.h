@@ -84,6 +84,7 @@ ilang::ExprRef GetByteAtRowCol(ArmSme& sme, int row, int col);
 // step parameter allows inspection at any timestep (default: step 0)
 // Format: row 0 at top, column 0 at left, each cell shows hex value
 void PrintZa(z3::model &mdl, ilang::IlaZ3Unroller &u, ArmSme& sme, int step=0);
+void InitZaToZero(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, ArmSme& sme, int step=0);
 
 // Constrain a slice (horizontal or vertical) to a value and automatically zero all other ZA bytes
 // This handles Z3 model completion by ensuring unconstrained bytes show as 0x00
