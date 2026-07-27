@@ -7,6 +7,7 @@
 - Model load store DRAM (using UFs), SVE2 instructions using <T> field
 - Verify instructions by constructing unit tests, then integration tests (eg., {ZERO, MOVA, SMOPA})
 ## Delayed Simple Tasks
+- Refactor unit tests to use the new `track_slice()` + `cstr_all_tracked_and_zero()` idiom
 - `SMSSTART/STOP` on/off zeroing behavior (B1.1.1 and E2 pseudocode of SM,ZA states)
 - Use `assert`s instead of `if` and `switch` for program invariants
 - Remove `merge` and `zero` mode `ExprRef` selection if Z3 takes too long

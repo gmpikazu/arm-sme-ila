@@ -5,6 +5,20 @@ using namespace ilang;
 using namespace arm;
 
 void test_cstr_helper(ArmSme& sme) {
+    CHECK("SHOWCASE: track_slice() + cstr_all_tracked_and_zero() idiom", sme, {"ZERO"},
+        [&](IlaZ3Unroller &u, z3::solver &s, z3::context &ctx) {
+            Tracker t;
+            // each new layer is applied on top of previously applied layer
+            track_slice(t, bv_val_128(ctx, 0x0001020304050607ULL, 0x08090A0B0C0D0E0F), 0, 0, false, BYTE);
+            track_slice(t, bv_val_128(ctx, 0xFFFFFFFFFFFFFFFFULL, 0xFFFFFFFFFFFFFFFF), 0, 2, true, BYTE);
+            track_slice(t, bv_val_128(ctx, 0x0001020304050607ULL, 0x08090A0B0C0D0E0F), 7, 0, false, BYTE);
+            cstr_all_tracked_and_zero(s, u, ctx, t, sme);
+        },
+        [&](z3::model &mdl, IlaZ3Unroller &u) {
+            PrintZa(mdl, u, sme, 0);
+        }
+    );
+
     CHECK("constrain horizontal slice with BYTE", sme, {"ZERO"},
         [&](IlaZ3Unroller &u, z3::solver &s, z3::context &ctx) {
             cstr_step_bv(s, u, ctx, sme.Imm8, 0x00ULL, 8); // make sure ZERO doesn't trigger

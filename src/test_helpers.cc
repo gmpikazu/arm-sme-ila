@@ -130,6 +130,7 @@ void InitZaToZero(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, ArmS
     }
 }
 
+
 void cstr_step_slice(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, ArmSme& sme,
                      const z3::expr &value_expr,
                      int tile_idx, int slice_idx, bool is_vertical, const ilang::NumericType& element_size_bits,
@@ -157,6 +158,63 @@ void cstr_step_slice(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, A
     } else {
         auto slice_expr = sme.GetHorizontalSlice(sme.za, tile_idx, slice_idx, element_size_bits);
         cstr_step(s, u, ctx, slice_expr, value_expr, step);
+    }
+}
+
+void track_slice(Tracker& tracker, const z3::expr& value_expr, int tile_idx, int slice_idx, bool is_vertical, const ilang::NumericType& element_size_bits) {
+    NumericType dim = SVL / element_size_bits;
+    NumericType num_tiles = SVL_B / dim;
+    int element_size_bytes = element_size_bits / BYTE;
+    
+    assert(value_expr.get_sort().bv_size() == SVL);
+    assert(SVL == Z_REG_WIDTH);
+    auto GetVecByteLSB = [&](size_t idx) -> z3::expr {
+        // get element of vector from LSB
+        size_t rightmost = BYTE * idx;
+        size_t leftmost = rightmost + BYTE - 1;
+        return value_expr.extract(leftmost, rightmost);
+    };
+    auto GetVecByteMSB = [&](size_t idx) -> z3::expr {
+        // get element of vector from MSB
+        size_t mirrored_idx = SVL_B - 1 - idx;
+        return GetVecByteLSB(mirrored_idx);
+    };
+    
+    if (is_vertical) {
+        // ARM SME: col_idx % dim (required by ARM)
+        int wrapped_col_idx = (dim == 1) ? 0 : (slice_idx & (dim - 1)); // & (dim-1) fast modulo
+        int col = (SVL_B - element_size_bytes) - (wrapped_col_idx * element_size_bytes);
+        
+        // bottom up direction for ARM SME vertical slice concatenation behavior
+        for (int i = (int) dim-1; i >= 0; i--) {
+            size_t row = tile_idx + i * num_tiles;
+            size_t base_addr = row * SVL_B + col;
+            for (int b = 0; b < element_size_bytes; b++) {
+                tracker.insert_or_assign(base_addr + b, GetVecByteLSB(i * element_size_bytes + b));
+            }
+        }
+    } else {
+        // ARM SME: row_idx % dim (required by ARM)
+        int wrapped_row_idx = (dim == 1) ? 0 : (slice_idx & (dim - 1)); // & (dim-1) fast modulo
+        size_t row = tile_idx + wrapped_row_idx * num_tiles;
+        
+        for (size_t col = 0; col < SVL_B; col++) {
+            tracker.insert_or_assign(row * SVL_B + col, GetVecByteMSB(col));
+        }
+    }
+}
+
+void cstr_all_tracked_and_zero(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const Tracker& tracker, ArmSme& sme, int step) {
+    for (size_t addr = 0; addr < ZA_BYTE_SIZE; addr++) {
+        auto byte_expr = Load(sme.za, BvConst(addr, sme.za.addr_width()));
+        auto it = tracker.find(addr);
+        if (it != tracker.end()) {
+            z3::expr val = it->second;
+            cstr_step(s, u, ctx, byte_expr, val, step);
+        }
+        else {
+            cstr_step_bv(s, u, ctx, byte_expr, 0x00, BYTE, step);
+        }
     }
 }
 

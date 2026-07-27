@@ -86,6 +86,7 @@ ilang::ExprRef GetByteAtRowCol(ArmSme& sme, int row, int col);
 void PrintZa(z3::model &mdl, ilang::IlaZ3Unroller &u, ArmSme& sme, int step=0);
 void InitZaToZero(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, ArmSme& sme, int step=0);
 
+// NOTE Prefer track_slice + cstr_all_tracked_and_zero idiom
 // Constrain a slice (horizontal or vertical) to a value and automatically zero all other ZA bytes
 // This handles Z3 model completion by ensuring unconstrained bytes show as 0x00
 // and automatically computes the slice expression internally to constrain it
@@ -93,6 +94,12 @@ void cstr_step_slice(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, A
                      const z3::expr &value_expr,
                      int tile_idx, int slice_idx, bool is_vertical, const ilang::NumericType& element_size_bits,
                      int step=0);
+
+typedef std::unordered_map<size_t, z3::expr> Tracker;
+// Does not constrain, just tracks a mapping (override) between address and z3::expr
+// Must finally call cstr_all_tracked() to constrain and zero out unconstrained addresses
+void track_slice(Tracker& tracker, const z3::expr& value_expr, int tile_idx, int slice_idx, bool is_vertical, const ilang::NumericType& element_size_bits);
+void cstr_all_tracked_and_zero(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const Tracker& tracker, ArmSme& sme, int step=0); // constrains the tracker and zeroes out the rest
 
 // TO_STR converts the ila expression into an evaluated string
 std::string TO_STR(const ilang::ExprRef &ila_expr, int step, ilang::IlaZ3Unroller &u, z3::model &mdl);
