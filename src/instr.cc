@@ -174,7 +174,7 @@ namespace arm {
             auto val = BvConst(Z_REG_WIDTH / BYTE, 64) * SExt(Imm6, 64);
             UpdateSingle64BitGPR(instr, Rd, val);
         }
-        { // Widening Outer Product and Accumulate or Subtract (K=2)
+        { // Widening Floating Point Outer Product and Accumulate or Subtract (K=2)
             auto f = [&](std::string name, NumericType opcode, NumericType dest_esize, NumericType src_esize, const ExprRef& tile_idx, bool sub_op, const ExprRef& fpzero, const FuncRef& neg_fn, const FuncRef& dotadd_fn){
                 InstrRef instr = m.NewInstr(name);
                 auto decode = SME_ON & (cmd == opcode);
@@ -189,7 +189,7 @@ namespace arm {
             f("FMOPA (fp16->fp32)", TEMP_OPCODE, WORD, HALF, constrained(ZAda, WORD), false, fp16_zero, fpneg16, fpdotadd16to32);
             f("FMOPS (fp16->fp32)", TEMP_OPCODE, WORD, HALF, constrained(ZAda, WORD), true, fp16_zero, fpneg16, fpdotadd16to32);
         }
-        { // Non-Widening Outer Product and Accumulate or Subtract (K=1)
+        { // Non-Widening Floating Point Outer Product and Accumulate or Subtract (K=1)
             // has .S and .D
             auto f = [&](std::string name, std::string suffix, NumericType opcode, NumericType esize, const ExprRef& tile_idx, bool sub_op, const FuncRef& neg_fn, const FuncRef& fmac_fn){
                 InstrRef instr = m.NewInstr(name);

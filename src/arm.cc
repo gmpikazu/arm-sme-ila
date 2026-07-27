@@ -408,10 +408,17 @@ namespace arm {
         assert(row_pred.bit_width() == P_REG_WIDTH);
     
         NumericType dim = Z_REG_WIDTH / element_size_bits;
-        
-        auto new_mem = mem;
-        for (size_t row = 0; row < dim; row++){
-            auto hor_slice = _GetTypedHorizontalSlice(new_mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, element_size_bits);
+
+        // 1. read all slices from THE SAME mem
+        std::vector<ExprRef> slices;
+        slices.reserve(dim);
+        for (size_t row = 0; row < dim; row++) {
+            auto hor_slice = _GetTypedHorizontalSlice(mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, element_size_bits);
+            slices.push_back(hor_slice);
+        }
+        // 2. update each slice stored in vector
+        for (size_t row = 0; row < dim; row++) {
+            auto hor_slice = slices[row];
             for (size_t col = 0; col < dim; col++){
                 auto old_elem = GetElementInVectorFromLSB(hor_slice, col, element_size_bits);
                 auto extra_elem = GetElementInVectorFromLSB(vec, col, element_size_bits);
@@ -419,20 +426,33 @@ namespace arm {
                 auto new_elem = Ite(row_col_activated, combine_fn(old_elem, extra_elem), Ite(is_zero_mode, BvConst(0, element_size_bits), old_elem));
                 hor_slice = SetElementInVectorFromLSB(hor_slice, col, element_size_bits, new_elem, Z_REG_WIDTH);
             }
-            // update the entire horizontal slice
+            slices[row] = hor_slice; // update the content of vector
+        }
+        // 3. accumulately-store slices into new_mem
+        auto new_mem = mem;
+        for (size_t row = 0; row < dim; row++){
+            auto hor_slice = slices[row];
             new_mem = _SetTypedHorizontalSlice(new_mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, element_size_bits, hor_slice);
         }
         return new_mem;
     }
+
     ExprRef ArmSme::CombineTileWithVerticalVector(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, const ExprRef& is_zero_mode, std::function<ExprRef(ExprRef a, ExprRef b)> combine_fn) {
         assert(row_pred.bit_width() == col_pred.bit_width());
         assert(row_pred.bit_width() == P_REG_WIDTH);
     
         NumericType dim = Z_REG_WIDTH / element_size_bits;
-        
-        auto new_mem = mem;
-        for (size_t col = 0; col < dim; col++){
-            auto ver_slice = _GetTypedVerticalSlice(new_mem, BvConst(col, ZA_ADDR_WIDTH), tile_idx, element_size_bits);
+
+        // 1. read all slices from THE SAME mem
+        std::vector<ExprRef> slices;
+        slices.reserve(dim);
+        for (size_t col = 0; col < dim; col++) {
+            auto ver_slice = _GetTypedVerticalSlice(mem, BvConst(col, ZA_ADDR_WIDTH), tile_idx, element_size_bits);
+            slices.push_back(ver_slice);
+        }
+        // 2. update each slice stored in vector
+        for (size_t col = 0; col < dim; col++) {
+            auto ver_slice = slices[col];
             for (size_t row = 0; row < dim; row++){
                 auto old_elem = GetElementInVectorFromLSB(ver_slice, row, element_size_bits);
                 auto extra_elem = GetElementInVectorFromLSB(vec, row, element_size_bits);
@@ -440,11 +460,20 @@ namespace arm {
                 auto new_elem = Ite(row_col_activated, combine_fn(old_elem, extra_elem), Ite(is_zero_mode, BvConst(0, element_size_bits), old_elem));
                 ver_slice = SetElementInVectorFromLSB(ver_slice, row, element_size_bits, new_elem, Z_REG_WIDTH);
             }
-            // update the entire vertical slice
+            slices[col] = ver_slice;
+        }
+        // 3. accumulately-store slices 
+        auto new_mem = mem;
+        for (size_t col = 0; col < dim; col++){
+            auto ver_slice = slices[col];
             new_mem = _SetTypedVerticalSlice(new_mem, BvConst(col, ZA_ADDR_WIDTH), tile_idx, element_size_bits, ver_slice);
         }
         return new_mem;
     }
+    
+    // ==================================================================================================
+    // BUG BELOW HAVE NOT BEEN UPDATED TO READ-UPDATE-STORE PATTERN =====================================
+    // ==================================================================================================
     
     ExprRef ArmSme::IntegerCombineTileWithMatrices(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, bool sub_instead_of_add, bool op1_unsigned, bool op2_unsigned) {
         NumericType dim = Z_REG_WIDTH / element_size_bits;

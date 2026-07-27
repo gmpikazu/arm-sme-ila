@@ -94,6 +94,9 @@ void cstr_step_slice(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, A
                      int tile_idx, int slice_idx, bool is_vertical, const ilang::NumericType& element_size_bits,
                      int step=0);
 
+// TO_STR converts the ila expression into an evaluated string
+std::string TO_STR(const ilang::ExprRef &ila_expr, int step, ilang::IlaZ3Unroller &u, z3::model &mdl);
+
 // PRINT function
 // @brief prints ila_expr in human-readable format
 void PRINT(const ilang::ExprRef &ila_expr, int step, ilang::IlaZ3Unroller &u, z3::model &mdl, std::string label = "");

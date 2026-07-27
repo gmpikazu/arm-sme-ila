@@ -160,6 +160,12 @@ void cstr_step_slice(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, A
     }
 }
 
+std::string TO_STR(const ilang::ExprRef &ila_expr, int step, ilang::IlaZ3Unroller &u, z3::model &mdl) {
+    auto expr = u.GetZ3Expr(ila_expr, step);
+    auto eval = mdl.eval(expr);
+    return eval.to_string();
+}
+
 void PRINT(const ilang::ExprRef &ila_expr, int step, ilang::IlaZ3Unroller &u, z3::model &mdl, std::string label) {
     static size_t counter = 0;
     auto expr = u.GetZ3Expr(ila_expr, step);

@@ -44,7 +44,8 @@ int main() {
     // test_cstr_helper(sme);
     // test_slice_helper(sme);
     // test_zero(sme);
-    test_mova(sme);
+    // test_mova(sme);
+    test_addha_addva(sme);
     
     // summary
     print_test_summary();

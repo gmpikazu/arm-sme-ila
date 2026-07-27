@@ -1,4 +1,8 @@
 # Project Plan
+## Crucial Clarification (in meeting)
+> Does ZA behave in little endian (rightmost is LSB) when interpreting elements on tile slices?
+- When modelling DRAM load/stores, we need to care about endianness (add a flag parameter)
+> Arithmetic Instruction with Predicate Masking are non-efficient, solver can't finish 
 ## Remaining Tasks
 - Model load store DRAM (using UFs), SVE2 instructions using <T> field
 - Verify instructions by constructing unit tests, then integration tests (eg., {ZERO, MOVA, SMOPA})
@@ -57,3 +61,10 @@ This document is aimed to provide viewers with an overview of the implementation
 ## Preventing Z3 Garbage Initialization
 - Explicitly constrain all values to prevent Z3 populating them with garbage
 - For ZA, this was done through `cstr_step_slice()` where all untouched addresses are explicitly set to `0x00` to clean up `PrintZa()`'s output for easier empirical verification
+
+## Optimizing Load Store Operations on ZA
+- Functions like `CombineTileWith*Vector()` follow the pattern:
+    1. First, read all the required bytes from old memory
+    2. Then, process all of the data inside register space
+    3. Finally, accumulatively-store the updated data into the state
+- Otherwise, initial naive `read, modify, and accumulate-store` per iteration is too complex for Z3 to solve in a reasonable amount of time because subsequent reads need to consider whether they are reading a previously stored value, causing deeply nested internal `Ite()` branching
