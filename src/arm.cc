@@ -471,15 +471,17 @@ namespace arm {
         return new_mem;
     }
     
-    // ==================================================================================================
-    // BUG BELOW HAVE NOT BEEN UPDATED TO READ-UPDATE-STORE PATTERN =====================================
-    // ==================================================================================================
-    
     ExprRef ArmSme::IntegerCombineTileWithMatrices(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, bool sub_instead_of_add, bool op1_unsigned, bool op2_unsigned) {
         NumericType dim = Z_REG_WIDTH / element_size_bits;
-        auto new_mem = mem;
+
+        std::vector<ExprRef> slices;
+        slices.reserve(dim);
         for (size_t row = 0; row < dim; row++){
-            auto hor_slice = _GetTypedHorizontalSlice(new_mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, element_size_bits);
+            auto hor_slice = _GetTypedHorizontalSlice(mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, element_size_bits);
+            slices.push_back(hor_slice);
+        }
+        for (size_t row = 0; row < dim; row++){
+            auto hor_slice = slices[row];
             for (size_t col = 0; col < dim; col++){
                 auto sum = GetElementInVectorFromLSB(hor_slice, col, element_size_bits);
                 // widening dot product (smaller bits into larger bits)
@@ -498,7 +500,12 @@ namespace arm {
                 }
                 // update hor_slice with new sum
                 hor_slice = SetElementInVectorFromLSB(hor_slice, col, element_size_bits, sum, Z_REG_WIDTH);
+                slices[row] = hor_slice;
             }
+        }
+        auto new_mem = mem;
+        for (size_t row = 0; row < dim; row++){
+            auto hor_slice = slices[row];
             // get new_mem by updating the entire horizontal slice
             new_mem = _SetTypedHorizontalSlice(new_mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, element_size_bits, hor_slice);
         }
@@ -507,9 +514,15 @@ namespace arm {
     
     ExprRef ArmSme::FloatCombineTileWithMatricesK2(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& pred1, const ExprRef& pred2, const NumericType& dest_element_size_bits, const NumericType& src_element_size_bits, bool sub_instead_of_add, const ExprRef& fpzero, const FuncRef& neg_fn, const FuncRef& dotadd_fn) {
         NumericType dim = Z_REG_WIDTH / dest_element_size_bits;
-        auto new_mem = mem;
+
+        std::vector<ExprRef> slices;
+        slices.reserve(dim);
         for (size_t row = 0; row < dim; row++){
-            auto hor_slice = _GetTypedHorizontalSlice(new_mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, dest_element_size_bits);
+            auto hor_slice = _GetTypedHorizontalSlice(mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, dest_element_size_bits);
+            slices.push_back(hor_slice);
+        }
+        for (size_t row = 0; row < dim; row++){
+            auto hor_slice = slices[row];
             for (size_t col = 0; col < dim; col++){
                 auto prow_0 = (GetBitFromLSB(pred1, 2*row+0) != 0);
                 auto prow_1 = (GetBitFromLSB(pred1, 2*row+1) != 0);
@@ -533,7 +546,12 @@ namespace arm {
                 
                 // update hor_slice with new sum
                 hor_slice = SetElementInVectorFromLSB(hor_slice, col, dest_element_size_bits, sum, Z_REG_WIDTH);
+                slices[row] = hor_slice;
             }
+        }
+        auto new_mem = mem;
+        for (size_t row = 0; row < dim; row++){
+            auto hor_slice = slices[row];
             // get new_mem by updating the entire horizontal slice
             new_mem = _SetTypedHorizontalSlice(new_mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, dest_element_size_bits, hor_slice);
         }
@@ -542,9 +560,15 @@ namespace arm {
 
     ExprRef ArmSme::FloatCombineTileWithMatricesK1(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& pred1, const ExprRef& pred2, const NumericType& element_size_bits, bool sub_instead_of_add, const FuncRef& neg_fn, const FuncRef& fmac_fn) {
         NumericType dim = Z_REG_WIDTH / element_size_bits;
-        auto new_mem = mem;
+
+        std::vector<ExprRef> slices;
+        slices.reserve(dim);
         for (size_t row = 0; row < dim; row++){
-            auto hor_slice = _GetTypedHorizontalSlice(new_mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, element_size_bits);
+            auto hor_slice = _GetTypedHorizontalSlice(mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, element_size_bits);
+            slices.push_back(hor_slice);
+        }
+        for (size_t row = 0; row < dim; row++){
+            auto hor_slice = slices[row];
             for (size_t col = 0; col < dim; col++){
                 auto sum = GetElementInVectorFromLSB(hor_slice, col, element_size_bits);
                 auto op1 = GetElementInVectorFromLSB(vec1, row, element_size_bits);
@@ -556,7 +580,12 @@ namespace arm {
                 
                 // update hor_slice with new sum
                 hor_slice = SetElementInVectorFromLSB(hor_slice, col, element_size_bits, sum, Z_REG_WIDTH);
+                slices[row] = hor_slice;
             }
+        }
+        auto new_mem = mem;
+        for (size_t row = 0; row < dim; row++){
+            auto hor_slice = slices[row];
             // get new_mem by updating the entire horizontal slice
             new_mem = _SetTypedHorizontalSlice(new_mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, element_size_bits, hor_slice);
         }
