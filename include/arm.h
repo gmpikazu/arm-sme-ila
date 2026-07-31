@@ -114,7 +114,8 @@ class ArmSme {
     ExprRef GetElementInVectorFromMSB(const ExprRef& vector, const NumericType& idx, const NumericType& element_size_bits, const NumericType& vector_length_bits); // leftmost element is index 0
 
     // @brief Uses GetElementInVectorFromLSB() to extract bit from vector
-    ExprRef GetBitFromLSB(const ExprRef& vector, const NumericType& idx);
+    // NOTE pass in BYTE to advance by single bit due to formula actual_idx = idx * (element_size_bits / BYTE)
+    ExprRef GetPredBitFromLSB(const ExprRef& vector, const NumericType& idx, const NumericType& element_size_bits);
     
     // @return New vector where element at idx is replaced with new_element
     ExprRef SetElementInVectorFromLSB(const ExprRef& vector, const NumericType& idx, const NumericType& element_size_bits, const ExprRef& new_element, const NumericType& vector_length_bits); // rightmost element is index 0

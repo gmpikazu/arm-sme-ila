@@ -75,7 +75,7 @@ namespace arm {
             ExprRef new_za = za;
             for (size_t tile_idx = 0; tile_idx < 8; tile_idx++){
                 // ASK is it really from LSB?
-                ExprRef activated = (GetBitFromLSB(Imm8, tile_idx) != 0);
+                ExprRef activated = (GetPredBitFromLSB(Imm8, tile_idx, BYTE) != 0);
                 ExprRef zeroed_tile_za = new_za;
                 // construct new ZA expr where tile[tile_idx] is zeroed out
                 for (size_t row_idx = 0; row_idx < 8; row_idx++){

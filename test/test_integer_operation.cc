@@ -4,6 +4,8 @@
 using namespace ilang;
 using namespace arm;
 
+// BUG need to modify predicate setting to use REAL ARM SME specifications
+
 void test_integer_outer_prod(ArmSme& sme) {
     // TODO continue
 }

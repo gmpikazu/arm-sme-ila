@@ -4,6 +4,7 @@
 - When modelling DRAM load/stores, we need to care about endianness (add a flag parameter)
 > Arithmetic Instruction with Predicate Masking are non-efficient, solver can't finish 
 ## Remaining Tasks
+- Refactor tests to set the correct predicate bits (use new `ElemP[]` implementation)
 - Model load store DRAM (using UFs), SVE2 instructions using <T> field
 - Verify instructions by constructing unit tests, then integration tests (eg., {ZERO, MOVA, SMOPA})
 ## Delayed Simple Tasks

@@ -268,10 +268,24 @@ namespace arm {
         NumericType mirrored_idx = (vector_length_bits / element_size_bits) - 1 - idx;
         return GetElementInVectorFromLSB(vector, mirrored_idx, element_size_bits);
     }
-    
-    ExprRef ArmSme::GetBitFromLSB(const ExprRef& vector, const NumericType& idx) {
-        // TODO could've used Ilang's GetBit function
-        return GetElementInVectorFromLSB(vector, idx, 1);
+
+    ExprRef ArmSme::GetPredBitFromLSB(const ExprRef& vector, const NumericType& idx, const NumericType& element_size_bits) {
+        // TODO could've used Ilang's GetBit function instead of GetElementInVectorFromLSB
+        /** source: https://support.arm.com/documentation/ddi0596/2021-06/Shared-Pseudocode/AArch64-Functions?lang=en
+         *   bit ElemP[bits(N) pred, integer e, integer esize]
+         *       integer n = e * (esize DIV 8);
+         *       assert n >= 0 && n < N;
+         *       return pred<n>;
+         */
+        auto new_impl = [&](){ // respects ARM SME's true implementation
+            const NumericType actual_idx = idx * (element_size_bits / BYTE);
+            assert(actual_idx >= 0 && actual_idx < P_REG_WIDTH);
+            return GetElementInVectorFromLSB(vector, actual_idx, 1); 
+        };
+        auto old_impl = [&](){
+            return GetElementInVectorFromLSB(vector, idx, 1);
+        };
+        return old_impl(); // NOTE modify to set new_impl or old_impl
     }
 
     ExprRef ArmSme::SetElementInVectorFromLSB(const ExprRef& vector, const NumericType& idx, const NumericType& element_size_bits, const ExprRef& new_element, const NumericType& vector_length_bits) {
@@ -394,7 +408,7 @@ namespace arm {
         for (size_t i = 0; i < num_elements; i++){
             ExprRef source_element = GetElementInVectorFromLSB(source, i, element_size_bits);
             ExprRef dest_element = GetElementInVectorFromLSB(dest, i, element_size_bits);
-            ExprRef is_activated = (GetBitFromLSB(predicate, i) != 0);
+            ExprRef is_activated = (GetPredBitFromLSB(predicate, i, element_size_bits) != 0);
             ExprRef new_element = Ite(is_activated, source_element, Ite(
                 is_zero_mode, BvConst(0, element_size_bits), dest_element
             ));
@@ -422,7 +436,7 @@ namespace arm {
             for (size_t col = 0; col < dim; col++){
                 auto old_elem = GetElementInVectorFromLSB(hor_slice, col, element_size_bits);
                 auto extra_elem = GetElementInVectorFromLSB(vec, col, element_size_bits);
-                ExprRef row_col_activated = (GetBitFromLSB(row_pred, row) != 0) & (GetBitFromLSB(col_pred, col) != 0);
+                ExprRef row_col_activated = (GetPredBitFromLSB(row_pred, row, element_size_bits) != 0) & (GetPredBitFromLSB(col_pred, col, element_size_bits) != 0);
                 auto new_elem = Ite(row_col_activated, combine_fn(old_elem, extra_elem), Ite(is_zero_mode, BvConst(0, element_size_bits), old_elem));
                 hor_slice = SetElementInVectorFromLSB(hor_slice, col, element_size_bits, new_elem, Z_REG_WIDTH);
             }
@@ -456,7 +470,7 @@ namespace arm {
             for (size_t row = 0; row < dim; row++){
                 auto old_elem = GetElementInVectorFromLSB(ver_slice, row, element_size_bits);
                 auto extra_elem = GetElementInVectorFromLSB(vec, row, element_size_bits);
-                ExprRef row_col_activated = (GetBitFromLSB(row_pred, row) != 0) & (GetBitFromLSB(col_pred, col) != 0);
+                ExprRef row_col_activated = (GetPredBitFromLSB(row_pred, row, element_size_bits) != 0) & (GetPredBitFromLSB(col_pred, col, element_size_bits) != 0);
                 auto new_elem = Ite(row_col_activated, combine_fn(old_elem, extra_elem), Ite(is_zero_mode, BvConst(0, element_size_bits), old_elem));
                 ver_slice = SetElementInVectorFromLSB(ver_slice, row, element_size_bits, new_elem, Z_REG_WIDTH);
             }
@@ -486,10 +500,11 @@ namespace arm {
                 auto sum = GetElementInVectorFromLSB(hor_slice, col, element_size_bits);
                 // widening dot product (smaller bits into larger bits)
                 for (size_t k = 0; k < 4; k++){
-                    // ASK note sure about predicates, ARM uses `ElemP[esize DIV 4]`
-                    auto activated = (GetBitFromLSB(row_pred, 4*row+k) != 0) & (GetBitFromLSB(col_pred, 4*col+k) != 0);
-
                     NumericType sub_element_size_bits = element_size_bits / 4;
+                    // ASK note sure about predicates, ARM uses `ElemP[esize DIV 4]`
+                    auto activated = (GetPredBitFromLSB(row_pred, 4*row+k, sub_element_size_bits) != 0) & (GetPredBitFromLSB(col_pred, 4*col+k, sub_element_size_bits) != 0);
+
+                    // TODO check from LSB how
                     auto op1 = GetElementInVectorFromLSB(vec1, 4*row+k, sub_element_size_bits);
                     op1 = op1_unsigned ? ZExt(op1, element_size_bits) : SExt(op1, element_size_bits);
                     auto op2 = GetElementInVectorFromLSB(vec2, 4*col+k, sub_element_size_bits);
@@ -524,10 +539,10 @@ namespace arm {
         for (size_t row = 0; row < dim; row++){
             auto hor_slice = slices[row];
             for (size_t col = 0; col < dim; col++){
-                auto prow_0 = (GetBitFromLSB(pred1, 2*row+0) != 0);
-                auto prow_1 = (GetBitFromLSB(pred1, 2*row+1) != 0);
-                auto pcol_0 = (GetBitFromLSB(pred2, 2*col+0) != 0);
-                auto pcol_1 = (GetBitFromLSB(pred2, 2*col+1) != 0);
+                auto prow_0 = (GetPredBitFromLSB(pred1, 2*row+0, src_element_size_bits) != 0);
+                auto prow_1 = (GetPredBitFromLSB(pred1, 2*row+1, src_element_size_bits) != 0);
+                auto pcol_0 = (GetPredBitFromLSB(pred2, 2*col+0, src_element_size_bits) != 0);
+                auto pcol_1 = (GetPredBitFromLSB(pred2, 2*col+1, src_element_size_bits) != 0);
 
                 auto sum = GetElementInVectorFromLSB(hor_slice, col, dest_element_size_bits);
                 auto erow_0 = Ite(prow_0, GetElementInVectorFromLSB(vec1, 2*row+0, src_element_size_bits), fpzero);
@@ -575,7 +590,7 @@ namespace arm {
                 auto op2 = GetElementInVectorFromLSB(vec2, col, element_size_bits);
 
                 if (sub_instead_of_add) op1 = neg_fn(op1);
-                auto activated = (GetBitFromLSB(pred1, row) != 0) & (GetBitFromLSB(pred2, col) != 0);
+                auto activated = (GetPredBitFromLSB(pred1, row, element_size_bits) != 0) & (GetPredBitFromLSB(pred2, col, element_size_bits) != 0);
                 sum = Ite(activated, fmac_fn({sum, op1, op2}), sum);
                 
                 // update hor_slice with new sum

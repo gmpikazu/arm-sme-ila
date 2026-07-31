@@ -4,6 +4,8 @@
 using namespace ilang;
 using namespace arm;
 
+// BUG need to modify predicate setting to use REAL ARM SME specifications
+
 void test_cstr_helper(ArmSme& sme) {
     CHECK("SHOWCASE: track_slice() + cstr_all_tracked_and_zero() idiom", sme, {"ZERO"},
         [&](IlaZ3Unroller &u, z3::solver &s, z3::context &ctx) {
