@@ -36,7 +36,7 @@ namespace arm {
     // ASK is it truly SVL_B bits? 8 or 16 p-registers for SME??
     // ASK are they indexed from LSB or MSB?
     const NumericType P_ADDR_WIDTH = std::log2(P_REG_COUNT);
-    const NumericType P_REG_WIDTH = SVL_B;
+    const NumericType P_REG_WIDTH = SVL_B; // NOTE current unit tests assume P_REG_WIDTH = 16 since we use 4 hex digits
 
 using namespace ilang;
 

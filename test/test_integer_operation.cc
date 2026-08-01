@@ -4,8 +4,6 @@
 using namespace ilang;
 using namespace arm;
 
-// BUG need to modify predicate setting to use REAL ARM SME specifications
-
 void test_integer_outer_prod(ArmSme& sme) {
     // TODO continue
     CHECK("UMOPA (8b->32b) correctly computes new matrix sum", sme, {"UMOPA (8b->32b)"},
@@ -57,7 +55,7 @@ void test_addha_addva(ArmSme& sme) {
             // predicates
             cstr_step_bv(s, u, ctx, sme.Pn, 0ULL, sme.Pn.bit_width()); // P[0]
             // cstr_step(s, u, ctx, sme.p_regs[0], ctx.bv_val(-1, P_REG_WIDTH)); // all ones
-            cstr_step_bv(s, u, ctx, sme.p_regs[0], 0xFEULL, P_REG_WIDTH); // except first row
+            cstr_step_bv(s, u, ctx, sme.p_regs[0], 0xFFF0ULL, P_REG_WIDTH); // except first row
             cstr_step_bv(s, u, ctx, sme.Pm, 1ULL, sme.Pm.bit_width()); // P[1]
             cstr_step(s, u, ctx, sme.p_regs[1], ctx.bv_val(-1, P_REG_WIDTH)); // all ones
             // source vector

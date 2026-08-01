@@ -28,9 +28,11 @@
 
 # Implementation Overview
 This document is aimed to provide viewers with an overview of the implementation specifics of this project
+
 ## Code Conventions
 - Widths and sizes are given in bits (eg., `SVL`, `BYTE`, `HALF`)
 - `UpdateSingle`-prefixed functions perform `instr.SetUpdate()` internally so **does not** support updating multiple changes at once (use lower-level helpers instead)
+
 ## ZA Storage
 **Representation:**
 - `SVL_B`x`SVL_B` matrix represented as a linear array of `BYTE`s
@@ -48,10 +50,13 @@ This document is aimed to provide viewers with an overview of the implementation
 - `GetElement` helper function `loads` adjacent `BYTE`s and concatenates them to form the output vector
 - `SetElement` helper function breaks the input vector into `BYTE`s and `stores` them into ZA memory byte-per-byte
 
-## Single Predicate Masking
+## Predicate Masking
 - ARM SME supports `/M` (merge mode), destination element is unmodified if source element is not activated by predicate bit, and `/Z` (zero mode), destination element is zeroed out instead when source element is not activated by predicate bit
-- Predicate registers contain `SVL_B` bits and `bit[i]` controls activation of `vector.elem[i]` where an element can occupy `esize` bits (eg., `BYTE`, `HALF`, etc)
-- The implementation extracts bits starting from LSB, higher order bits are ignored when we have iterated over `num_elements` bits
+- Predicate registers contain `SVL_B` bits and `bit[i * (esize / BYTE)]` controls activation of `vector.elem[i]` where an element can occupy `esize` bits (eg., `BYTE`, `HALF`, etc)
+- The implementation extracts bits starting from LSB, where index `i` is multiplied by `(element_size_bits) / BYTE`, following ARM's convention in this [website](https://support.arm.com/documentation/ddi0596/2021-06/Shared-Pseudocode/AArch64-Functions?lang=en), this means:
+    1. For a WORD Vector like `[0x11111111, 0x33333333, 0x55555555, 0x77777777]`, both Predicate Masks `[0xFFFF]` or `[0x1111]` effectively activate all four elements of the WORD vector because only the rightmost bit of every 4-bit-group starting from the right is associated with the activation of a WORD element (note: `0x1 == 0b0001`)
+    2. For a BYTE vector, `(esize / BYTE) = 1` so each predicate bit corresponds to exactly one byte of the BYTE vector
+    3. For general vectors of `esize`-byte elements, `SVL / esize` predicate bits are needed to control all elements
 
 ## Instruction Unit Testing
 - Specify a vector of instructions to `UnrollPathConn()`

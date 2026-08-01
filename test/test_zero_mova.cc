@@ -4,8 +4,6 @@
 using namespace ilang;
 using namespace arm;
 
-// BUG need to modify predicate setting to use REAL ARM SME specifications
-
 void test_cstr_helper(ArmSme& sme) {
     CHECK("SHOWCASE: track_slice() + cstr_all_tracked_and_zero() idiom", sme, {"ZERO"},
         [&](IlaZ3Unroller &u, z3::solver &s, z3::context &ctx) {
@@ -120,7 +118,7 @@ void test_mova(ArmSme& sme) {
             // constrain the predicate reg and its value
             cstr_step_bv(s, u, ctx, sme.Pg, 5ULL, sme.Pg.bit_width());
 
-            cstr_step_bv(s, u, ctx, sme.p_regs[5], 0x5ULL, P_REG_WIDTH); // only first and third element
+            cstr_step_bv(s, u, ctx, sme.p_regs[5], 0x0101ULL, P_REG_WIDTH); // only first and third element
             // cstr_step(s, u, ctx, sme.p_regs[5], ctx.bv_val(-1, P_REG_WIDTH)); // all ones
             
             // constrain tile selection, tile_idx == 3

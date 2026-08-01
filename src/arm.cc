@@ -270,22 +270,15 @@ namespace arm {
     }
 
     ExprRef ArmSme::GetPredBitFromLSB(const ExprRef& vector, const NumericType& idx, const NumericType& element_size_bits) {
-        // TODO could've used Ilang's GetBit function instead of GetElementInVectorFromLSB
         /** source: https://support.arm.com/documentation/ddi0596/2021-06/Shared-Pseudocode/AArch64-Functions?lang=en
          *   bit ElemP[bits(N) pred, integer e, integer esize]
          *       integer n = e * (esize DIV 8);
          *       assert n >= 0 && n < N;
          *       return pred<n>;
          */
-        auto new_impl = [&](){ // respects ARM SME's true implementation
-            const NumericType actual_idx = idx * (element_size_bits / BYTE);
-            assert(actual_idx >= 0 && actual_idx < P_REG_WIDTH);
-            return GetElementInVectorFromLSB(vector, actual_idx, 1); 
-        };
-        auto old_impl = [&](){
-            return GetElementInVectorFromLSB(vector, idx, 1);
-        };
-        return old_impl(); // NOTE modify to set new_impl or old_impl
+        const NumericType actual_idx = idx * (element_size_bits / BYTE);
+        assert(actual_idx >= 0 && actual_idx < P_REG_WIDTH);
+        return SelectBit(vector, actual_idx);
     }
 
     ExprRef ArmSme::SetElementInVectorFromLSB(const ExprRef& vector, const NumericType& idx, const NumericType& element_size_bits, const ExprRef& new_element, const NumericType& vector_length_bits) {
@@ -507,16 +500,15 @@ namespace arm {
 
         NumericType dim = Z_REG_WIDTH / element_size_bits;
         NumericType sub_esize = element_size_bits / 4;
-        NumericType pred_elements = P_REG_WIDTH; // TODO check how many elements do we really need? new impl ElemP[]
         NumericType vec_num_sub_elem = SVL / sub_esize;
 
         // NOTE pre-extract the bits from predicate and vectors (since they are deeply nested Ite() trees)
         // otherwise, Extract() will construct a whole new tree each time, now we simply reference existing trees
         std::vector<ExprRef> row_bits;
-        row_bits.reserve(pred_elements);
+        row_bits.reserve(vec_num_sub_elem);
         std::vector<ExprRef> col_bits;
-        col_bits.reserve(pred_elements);
-        for (size_t i = 0; i < pred_elements; i++) {
+        col_bits.reserve(vec_num_sub_elem);
+        for (size_t i = 0; i < vec_num_sub_elem; i++) {
             row_bits.push_back(GetPredBitFromLSB(row_pred, i, sub_esize));
             col_bits.push_back(GetPredBitFromLSB(col_pred, i, sub_esize));
         }
