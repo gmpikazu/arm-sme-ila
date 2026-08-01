@@ -86,7 +86,7 @@ void PrintZa(z3::model &mdl, ilang::IlaZ3Unroller &u, ArmSme& sme, int step) {
     
     // Print column headers
     std::cout << "│";
-    for (size_t col = 0; col < SVL_B; col++) {
+    for (ssize_t col = SVL_B-1; col >= 0; col--) {
         std::cout << std::setw(cell_width) << std::right << col;
     }
     std::cout << " │" << std::endl;
@@ -108,6 +108,9 @@ void PrintZa(z3::model &mdl, ilang::IlaZ3Unroller &u, ArmSme& sme, int step) {
             if (byte_val.size() > 2 && byte_val.substr(0, 2) == "#x") {
                 byte_val = byte_val.substr(2);
             }
+            
+            // NOTE make 00 into __
+            if (byte_val == "00") { byte_val = "__"; }
             
             // without prefix
             std::cout << std::setw(2) << std::setfill('0') << std::uppercase << byte_val << " ";

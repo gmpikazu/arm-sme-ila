@@ -22,7 +22,7 @@ namespace arm {
     #define QUAD 128
 
     // NOTE current unit tests assume SVL = 128, since we constrain only 128 bits
-    constexpr NumericType SVL = 128; 
+    constexpr NumericType SVL = 128; // NOTE must be >= 128 to support QUAD
     constexpr NumericType SVL_B = SVL / BYTE;
     const NumericType LOG2_SVL_B = std::log2(SVL_B);
     constexpr NumericType GPR_COUNT = 31;

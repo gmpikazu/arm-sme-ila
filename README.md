@@ -70,3 +70,72 @@ This document is aimed to provide viewers with an overview of the implementation
     2. Then, process all of the data inside register space
     3. Finally, accumulatively-store the updated data into the state
 - Otherwise, initial naive `read, modify, and accumulate-store` per iteration is too complex for Z3 to solve in a reasonable amount of time because subsequent reads need to consider whether they are reading a previously stored value, causing deeply nested internal `Ite()` branching
+
+# Z3 Timeout Cases and Solutions ( + Confusions marked with TODO)
+Z3 timed out during `UnrollPathConn` in some cases, below lists the bottlenecks and patterns to address each
+
+## `CombineTileWith*Vector()`: Storing to somewhere we are about to Load WITHIN the same loop
+- **problem:** future iterations need to reason whether their read slice was previously written in the past or not
+- **solution (see current code):** first read from old `mem`, then update things, finally propagate changes to `new_mem`
+```cpp
+// PROBLEMATIC
+ExprRef ArmSme::CombineTileWithHorizontalVector(...) {
+    NumericType dim = Z_REG_WIDTH / element_size_bits;
+
+    auto new_mem = mem; // 1. saves new_mem
+    for (size_t row = 0; row < dim; row++){
+        auto hor_slice = _GetTypedHorizontalSlice(new_mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, element_size_bits);
+        // 2. perform modification
+        for (size_t col = 0; col < dim; col++){
+            auto old_elem = GetElementInVectorFromLSB(hor_slice, col, element_size_bits);
+            auto extra_elem = GetElementInVectorFromLSB(vec, col, element_size_bits);
+            ExprRef row_col_activated = (GetBitFromLSB(row_pred, row) != 0) & (GetBitFromLSB(col_pred, col) != 0);
+            auto new_elem = Ite(row_col_activated, combine_fn(old_elem, extra_elem), Ite(is_zero_mode, BvConst(0, element>
+            hor_slice = SetElementInVectorFromLSB(hor_slice, col, element_size_bits, new_elem, Z_REG_WIDTH);
+        }
+        // 3. updates new_mem
+        new_mem = _SetTypedHorizontalSlice(new_mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, element_size_bits, hor_slice);
+    }
+    return new_mem;
+}
+```
+
+## `IntegerCombineTileWithMatrices`: Innermost loop built an AST with many Load() nodes
+- **insight:** commenting out the `Ite(activated, sum + prod, sum)` fixed the timeout, but why?
+- **problems:** <!-- TODO have not identified all the problems thoroughly, focusing on empirically working solution -->
+    1. `sum` is a big AST of `Extract` operations on concatenated `Load` operations where `ZA`, being a `MemState`, is modelled as a functional array (ie., nested `Ite` tree of `Stores`, `addr`, etc)
+    2. `sum@1 = Ite(activated, sum@0 + prod, sum@0)` builds an AST where left and right child depends on previous `sum`
+    3. `activated` is built from `Extract` operations on `row_pred`, `col_pred` which are also nested `Ite` trees of `p_regs[i]`. Similarly, `op1`, `op2` depend on `vec1`, `vec2` which are also nested `Ite` trees of `z_regs[i]`
+- **solutions (see current code):**
+    1. use `sum` sparingly, delegate the complex arithmetic to a newly-instantiated `BvConst(0, element_size_bits)`, that does not come with a big memory tree, and only combine them together at the very end
+    2. pre-extract both `op`s (extract Vector elements and `SExt` or `ZExt`) and predicate bits into an `std::vector` and inner loop only references those pre-extracting `ExprRef`s (optional) <!-- TODO why does this matter? -->
+```cpp
+// PROBLEMATIC
+ExprRef ArmSme::IntegerCombineTileWithMatrices(...) {
+    NumericType dim = Z_REG_WIDTH / element_size_bits;
+    auto new_mem = mem;
+    for (size_t row = 0; row < dim; row++){
+        auto hor_slice = _GetTypedHorizontalSlice(new_mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, element_size_bits);
+        for (size_t col = 0; col < dim; col++){
+            auto sum = GetElementInVectorFromLSB(hor_slice, col, element_size_bits);
+            for (size_t k = 0; k < 4; k++){
+                auto activated = (GetBitFromLSB(row_pred, 4*row+k) != 0) & (GetBitFromLSB(col_pred, 4*col+k) != 0);
+
+                NumericType sub_element_size_bits = element_size_bits / 4;
+                auto op1 = GetElementInVectorFromLSB(vec1, 4*row+k, sub_element_size_bits);
+                op1 = op1_unsigned ? ZExt(op1, element_size_bits) : SExt(op1, element_size_bits);
+                auto op2 = GetElementInVectorFromLSB(vec2, 4*col+k, sub_element_size_bits);
+                op2 = op2_unsigned ? ZExt(op2, element_size_bits) : SExt(op2, element_size_bits);
+                auto prod = op1 * op2;
+                if (sub_instead_of_add) prod = -prod;
+                sum = Ite(activated, sum + prod, sum); // 3. left and right expression contain `sum`
+            }
+            // update hor_slice with new sum
+            hor_slice = SetElementInVectorFromLSB(hor_slice, col, element_size_bits, sum, Z_REG_WIDTH);
+        }
+        // get new_mem by updating the entire horizontal slice
+        new_mem = _SetTypedHorizontalSlice(new_mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, element_size_bits, hor_slice);
+    }
+    return new_mem;
+}
+```

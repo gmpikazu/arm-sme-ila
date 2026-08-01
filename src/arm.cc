@@ -416,6 +416,11 @@ namespace arm {
         }
         return result;
     }
+
+    // =====================================================================================
+    // TODO hor/ver vector combine tile still does not do pre-extracting vector and predicate
+    // TODO can remove zero mode Ite if not needed, but won't affect Z3 complexity that much
+    // =====================================================================================
     
     ExprRef ArmSme::CombineTileWithHorizontalVector(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, const ExprRef& is_zero_mode, std::function<ExprRef(ExprRef a, ExprRef b)> combine_fn) {
         assert(row_pred.bit_width() == col_pred.bit_width());
@@ -486,8 +491,36 @@ namespace arm {
     }
     
     ExprRef ArmSme::IntegerCombineTileWithMatrices(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, bool sub_instead_of_add, bool op1_unsigned, bool op2_unsigned) {
-        NumericType dim = Z_REG_WIDTH / element_size_bits;
 
+        #if 0 // TODO pre-extract op1 op2
+        std::vector<ExprRef> vec1_ext;
+        std::vector<ExprRef> vec2_ext;
+        vec1_ext.reserve(total_sub);
+        vec2_ext.reserve(total_sub);
+        for (size_t i = 0; i < total_sub; ++i) {
+            auto e1 = GetElementInVectorFromLSB(vec1, i, sub_esize);
+            auto e2 = GetElementInVectorFromLSB(vec2, i, sub_esize);
+            vec1_ext.push_back(op1_unsigned ? ZExt(e1, element_size_bits) : SExt(e1, element_size_bits));
+            vec2_ext.push_back(op2_unsigned ? ZExt(e2, element_size_bits) : SExt(e2, element_size_bits));
+        }
+        #endif
+
+        NumericType dim = Z_REG_WIDTH / element_size_bits;
+        NumericType sub_esize = element_size_bits / 4;
+        NumericType pred_elements = P_REG_WIDTH; // TODO check how many elements do we really need? new impl ElemP[]
+        NumericType vec_num_sub_elem = SVL / sub_esize;
+
+        // NOTE pre-extract the bits from predicate and vectors (since they are deeply nested Ite() trees)
+        // otherwise, Extract() will construct a whole new tree each time, now we simply reference existing trees
+        std::vector<ExprRef> row_bits;
+        row_bits.reserve(pred_elements);
+        std::vector<ExprRef> col_bits;
+        col_bits.reserve(pred_elements);
+        for (size_t i = 0; i < pred_elements; i++) {
+            row_bits.push_back(GetPredBitFromLSB(row_pred, i, sub_esize));
+            col_bits.push_back(GetPredBitFromLSB(col_pred, i, sub_esize));
+        }
+        // processing using pre-extracted predicate bits
         std::vector<ExprRef> slices;
         slices.reserve(dim);
         for (size_t row = 0; row < dim; row++){
@@ -497,22 +530,23 @@ namespace arm {
         for (size_t row = 0; row < dim; row++){
             auto hor_slice = slices[row];
             for (size_t col = 0; col < dim; col++){
-                auto sum = GetElementInVectorFromLSB(hor_slice, col, element_size_bits);
+                auto delta = BvConst(0, element_size_bits); // newly-instantiated
                 // widening dot product (smaller bits into larger bits)
                 for (size_t k = 0; k < 4; k++){
-                    NumericType sub_element_size_bits = element_size_bits / 4;
                     // ASK note sure about predicates, ARM uses `ElemP[esize DIV 4]`
-                    auto activated = (GetPredBitFromLSB(row_pred, 4*row+k, sub_element_size_bits) != 0) & (GetPredBitFromLSB(col_pred, 4*col+k, sub_element_size_bits) != 0);
+                    auto activated = (row_bits[4*row+k] != 0) & (col_bits[4*col+k] != 0);
 
-                    // TODO check from LSB how
-                    auto op1 = GetElementInVectorFromLSB(vec1, 4*row+k, sub_element_size_bits);
+                    auto op1 = GetElementInVectorFromLSB(vec1, 4*row+k, sub_esize);
                     op1 = op1_unsigned ? ZExt(op1, element_size_bits) : SExt(op1, element_size_bits);
-                    auto op2 = GetElementInVectorFromLSB(vec2, 4*col+k, sub_element_size_bits);
+                    auto op2 = GetElementInVectorFromLSB(vec2, 4*col+k, sub_esize);
                     op2 = op2_unsigned ? ZExt(op2, element_size_bits) : SExt(op2, element_size_bits);
                     auto prod = op1 * op2;
                     if (sub_instead_of_add) prod = -prod;
-                    sum = Ite(activated, sum + prod, sum); // only updated if active
+                    delta = Ite(activated, delta + prod, delta); // only updated if active
                 }
+                auto sum = GetElementInVectorFromLSB(hor_slice, col, element_size_bits);
+                sum = sum + delta; // get new_sum by adding delta (we only used sum once in each iteration)
+                
                 // update hor_slice with new sum
                 hor_slice = SetElementInVectorFromLSB(hor_slice, col, element_size_bits, sum, Z_REG_WIDTH);
                 slices[row] = hor_slice;
@@ -526,6 +560,11 @@ namespace arm {
         }
         return new_mem;
     }
+    
+    // ================================================
+    // TODO below need to use pre-extract predicate bits
+    // BUG below still reuses the same `sum` which will timeout Z3
+    // ================================================
     
     ExprRef ArmSme::FloatCombineTileWithMatricesK2(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& pred1, const ExprRef& pred2, const NumericType& dest_element_size_bits, const NumericType& src_element_size_bits, bool sub_instead_of_add, const ExprRef& fpzero, const FuncRef& neg_fn, const FuncRef& dotadd_fn) {
         NumericType dim = Z_REG_WIDTH / dest_element_size_bits;

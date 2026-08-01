@@ -8,6 +8,46 @@ using namespace arm;
 
 void test_integer_outer_prod(ArmSme& sme) {
     // TODO continue
+    CHECK("UMOPA (8b->32b) correctly computes new matrix sum", sme, {"UMOPA (8b->32b)"},
+        [&](IlaZ3Unroller& u, z3::solver& s, z3::context& ctx) {
+            InitZaToZero(s, u, ctx, sme);
+            cstr_step_bv(s, u, ctx, sme.ZAda, 0x01ULL, sme.ZAda.bit_width()); // tile 1
+            // predicates
+            cstr_step_bv(s, u, ctx, sme.Pn, 0x01ULL, sme.Pn.bit_width()); // P[1]
+            cstr_step(s, u, ctx, sme.p_regs[1], ctx.bv_val(-1, P_REG_WIDTH)); // all ones
+            cstr_step_bv(s, u, ctx, sme.Pm, 0x02ULL, sme.Pm.bit_width()); // P[2]
+            // TODO predicate logic is confusing me
+            // cstr_step_bv(s, u, ctx, sme.p_regs[2], 0xF0E0, P_REG_WIDTH); // disable certain elements in 2D input matrix
+            cstr_step(s, u, ctx, sme.p_regs[2], ctx.bv_val(-1, P_REG_WIDTH)); // all ones
+            // vector registers
+            cstr_step_bv(s, u, ctx, sme.Zn, 0x01ULL, sme.Zn.bit_width()); // Z[1]
+            cstr_step(s, u, ctx, sme.z_regs[1], bv_val_128(ctx, 0x0001020304050607ULL, 0x08090A0B0C0D0E0FULL));
+            cstr_step_bv(s, u, ctx, sme.Zm, 0x02ULL, sme.Zm.bit_width()); // Z[2]
+            cstr_step(s, u, ctx, sme.z_regs[2], bv_val_128(ctx, 0x0001020304050607ULL, 0x08090A0B0C0D0E0FULL));
+        },
+        [&](z3::model& mdl, IlaZ3Unroller& u) {
+            std::cout << " input vector registers Z[1] and Z[2]\n";
+            PRINT(sme.z_regs[1], 0, u, mdl, "Zn @ 0");
+            PRINT(sme.z_regs[2], 0, u, mdl, "Zm @ 0");
+            std::cout << " ZA initially zeroed out\n";
+            PrintZa(mdl, u, sme, 0);
+            std::cout << " then contains the resulting matrix\n";
+            PrintZa(mdl, u, sme, 1);
+            std::cout << " row slices of ZA1H from top to bottom\n";
+            std::vector<ExprRef> row_slices;
+            for (size_t i = 0; i < 4; i++){
+                row_slices.push_back(sme.GetHorizontalSlice(sme.za, 1, i, WORD));
+            }
+            PRINT(row_slices[0], 1, u, mdl, "ZA1H.S[0] @ 1");
+            PRINT(row_slices[1], 1, u, mdl, "ZA1H.S[1] @ 1");
+            PRINT(row_slices[2], 1, u, mdl, "ZA1H.S[2] @ 1");
+            PRINT(row_slices[3], 1, u, mdl, "ZA1H.S[3] @ 1");
+            EXPECT_TRUE(TO_STR(row_slices[0], 1, u, mdl) == "#x000000560000012e00000206000002de");
+            EXPECT_TRUE(TO_STR(row_slices[1], 1, u, mdl) == "#x0000003e000000d60000016e00000206");
+            EXPECT_TRUE(TO_STR(row_slices[2], 1, u, mdl) == "#x000000260000007e000000d60000012e");
+            EXPECT_TRUE(TO_STR(row_slices[3], 1, u, mdl) == "#x0000000e000000260000003e00000056");
+        }
+    );
 }
 
 void test_addha_addva(ArmSme& sme) {
