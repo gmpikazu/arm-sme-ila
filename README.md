@@ -4,10 +4,14 @@
 - When modelling DRAM load/stores, we need to care about endianness (add a flag parameter)
 > Arithmetic Instruction with Predicate Masking are non-efficient, solver can't finish 
 ## Remaining Tasks
-- Refactor tests to set the correct predicate bits (use new `ElemP[]` implementation)
+- Check ARM pseudocode for Floating Point blackbox instructions (similar to checking `ElemP[]` implementation)
+    - eg., neg_fn, fmac_fn, fdotadd_fn, etc
+- Optimize `K2` FP instructions using `delta` then `sum` pattern <!-- TODO: optimizations require checking the true ARM pseuducode to see whether we can split the logic into `delta` and `sum` -->
 - Model load store DRAM (using UFs), SVE2 instructions using <T> field
+- Test edge cases of `XZR`, `WZR` access and write
 - Verify instructions by constructing unit tests, then integration tests (eg., {ZERO, MOVA, SMOPA})
 ## Delayed Simple Tasks
+- Not all instructions require Streaming SVE Mode, some only need ZA
 - Refactor unit tests to use the new `track_slice()` + `cstr_all_tracked_and_zero()` idiom
 - `SMSSTART/STOP` on/off zeroing behavior (B1.1.1 and E2 pseudocode of SM,ZA states)
 - Use `assert`s instead of `if` and `switch` for program invariants

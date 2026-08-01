@@ -228,10 +228,9 @@ std::string TO_STR(const ilang::ExprRef &ila_expr, int step, ilang::IlaZ3Unrolle
 }
 
 void PRINT(const ilang::ExprRef &ila_expr, int step, ilang::IlaZ3Unroller &u, z3::model &mdl, std::string label) {
-    static size_t counter = 0;
     auto expr = u.GetZ3Expr(ila_expr, step);
     auto eval = mdl.eval(expr);
-    std::cout << " LOG[" << counter++ << "] '" << label << "' "<< eval.to_string() << std::endl;
+    std::cout << " |> \"" << label << "\" : " << eval.to_string() << std::endl;
 }
 
 void CHECK(const std::string& test_name, ArmSme& sme, const std::vector<std::string>& instr_names,
