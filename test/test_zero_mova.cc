@@ -127,7 +127,7 @@ void test_mova(ArmSme& sme) {
             // constrain slice index by fixing W[2] and Imm, col_idx == 1
             cstr_step_bv(s, u, ctx, sme.Rs, 2ULL, sme.Rs.bit_width());
 
-            cstr_step_bv(s, u, ctx, sme.Get32BitGPR(2), 0ULL, 32); // NOTE equivalent with below
+            cstr_step_bv(s, u, ctx, sme.Get32BitGPR(2), 0ULL, 32); // NOTE: equivalent with below
             // cstr_step(s, u, ctx, sme.Get32BitGPR(2), ctx.bv_val(0, 32));
             
             cstr_step_bv(s, u, ctx, sme.Imm, 1ULL, sme.Imm.bit_width());

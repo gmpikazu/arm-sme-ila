@@ -2,7 +2,7 @@
 
 namespace arm {
 
-    // NOTE esize is BUILT-INTO the instruction using .B .H .W .D .Q suffixes
+    // NOTE: esize is BUILT-INTO the instruction using .B .H .W .D .Q suffixes
     void ArmSme::AddInstructions() {
         { // SMSTART
             InstrRef instr = m.NewInstr("SMSTART");
@@ -10,7 +10,7 @@ namespace arm {
             instr.SetDecode(decode);
             instr.SetUpdate(pstate_sm, BoolConst(true));
             instr.SetUpdate(pstate_za, BoolConst(true));
-            // TODO zero out vector and predicate registers
+            // TODO: zero out vector and predicate registers
         }
         { // SMSTOP
             InstrRef instr = m.NewInstr("SMSTOP");
@@ -18,17 +18,17 @@ namespace arm {
             instr.SetDecode(decode);
             instr.SetUpdate(pstate_sm, BoolConst(false));
             instr.SetUpdate(pstate_za, BoolConst(false));
-            // TODO zero out vector and predicate registers
-            // TODO changing pstate_ZA may zero out the ZA storage (read B1.1.1.2 PSTATE.ZA)
+            // TODO: zero out vector and predicate registers
+            // TODO: changing pstate_ZA may zero out the ZA storage (read B1.1.1.2 PSTATE.ZA)
         }
         
-        // NOTE instructions below requires Streaming SVE mode
+        // NOTE: instructions below requires Streaming SVE mode
         ExprRef SME_ON = pstate_sm & pstate_za;
         #define constrained(tile_idx, esize) ToConstrainedTileIndex(tile_idx, esize)
         
-        // TODO move the constrained() logic INTO the lambda itself, all instr below
-        // TODO update the lambdas to use const reference instead
-        // ASK since MOV is alias to MOVA, maybe no need to implement
+        // TODO: move the constrained() logic INTO the lambda itself, all instr below
+        // TODO: update the lambdas to use const reference instead
+        // ASK: since MOV is alias to MOVA, maybe no need to implement
         { // MOVA (tile to vector)
             auto f = [&](NumericType opcode, NumericType esize, std::string suffix, ExprRef tile_idx, ExprRef imm){
                 InstrRef instr = m.NewInstr("MOVA_T2V"+suffix);
@@ -70,11 +70,11 @@ namespace arm {
             auto decode = SME_ON & TEMP_DECODE;
             instr.SetDecode(decode);
 
-            // NOTE instruction only operates on 64-bit tiles (8 tiles total)
+            // NOTE: instruction only operates on 64-bit tiles (8 tiles total)
             NumericType esize = DOUBLE; 
             ExprRef new_za = za;
             for (size_t tile_idx = 0; tile_idx < 8; tile_idx++){
-                // ASK is it really from LSB?
+                // ASK: is it really from LSB?
                 ExprRef activated = (GetPredBitFromLSB(Imm8, tile_idx, BYTE) != 0);
                 ExprRef zeroed_tile_za = new_za;
                 // construct new ZA expr where tile[tile_idx] is zeroed out
@@ -170,7 +170,7 @@ namespace arm {
             auto decode = SME_ON & (cmd == TEMP_OPCODE);
             instr.SetDecode(decode);
             
-            // NOTE no SP support for this instruction
+            // NOTE: no SP support for this instruction
             auto val = BvConst(Z_REG_WIDTH / BYTE, 64) * SExt(Imm6, 64);
             UpdateSingle64BitGPR(instr, Rd, val);
         }
@@ -183,7 +183,7 @@ namespace arm {
                 auto new_za = FloatCombineTileWithMatricesK2(za, tile_idx, GetVectorRegister(Zn), GetVectorRegister(Zm), GetPredicateRegister(Pn), GetPredicateRegister(Pm), dest_esize, src_esize, sub_op, fpzero, neg_fn, dotadd_fn);
                 instr.SetUpdate(za, new_za);
             };
-            // TODO bf16 and fp16 treated the same
+            // TODO: bf16 and fp16 treated the same
             f("BFMOPA (bf16->fp32)", TEMP_OPCODE, WORD, HALF, constrained(ZAda, WORD), false, bf16_zero, bfneg16, bfdotadd16to32);
             f("BFMOPS (bf16->fp32)", TEMP_OPCODE, WORD, HALF, constrained(ZAda, WORD), true, bf16_zero, bfneg16, bfdotadd16to32);
             f("FMOPA (fp16->fp32)", TEMP_OPCODE, WORD, HALF, constrained(ZAda, WORD), false, fp16_zero, fpneg16, fpdotadd16to32);

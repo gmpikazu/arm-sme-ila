@@ -109,7 +109,7 @@ void PrintZa(z3::model &mdl, ilang::IlaZ3Unroller &u, ArmSme& sme, int step) {
                 byte_val = byte_val.substr(2);
             }
             
-            // NOTE make 00 into __
+            // NOTE: make 00 into __
             if (byte_val == "00") { byte_val = "__"; }
             
             // without prefix

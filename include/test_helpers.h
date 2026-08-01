@@ -63,7 +63,7 @@ void record_failure(const std::string& msg);
 // step defaults to step 0 (initial step)
 void cstr_step_bool(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const ilang::ExprRef &ila_expr, bool value, int step=0);
 void cstr_step_int(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const ilang::ExprRef &ila_expr, int value, int step=0);
-// NOTE only supports 64 bit length, for bigger lengths just use cstr_step and ctx.concat(bv_val(),bv_val()) manually
+// NOTE: only supports 64 bit length, for bigger lengths just use cstr_step and ctx.concat(bv_val(),bv_val()) manually
 void cstr_step_bv(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const ilang::ExprRef &ila_expr, uint64_t value, size_t bit_width, int step=0);
 void cstr_step(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const ilang::ExprRef &ila_expr, const z3::expr &value_expr, int step=0);
 // --------------------------------------------------------------
@@ -86,7 +86,7 @@ ilang::ExprRef GetByteAtRowCol(ArmSme& sme, int row, int col);
 void PrintZa(z3::model &mdl, ilang::IlaZ3Unroller &u, ArmSme& sme, int step=0);
 void InitZaToZero(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, ArmSme& sme, int step=0);
 
-// NOTE Prefer track_slice + cstr_all_tracked_and_zero idiom
+// NOTE: Prefer track_slice + cstr_all_tracked_and_zero idiom
 // Constrain a slice (horizontal or vertical) to a value and automatically zero all other ZA bytes
 // This handles Z3 model completion by ensuring unconstrained bytes show as 0x00
 // and automatically computes the slice expression internally to constrain it

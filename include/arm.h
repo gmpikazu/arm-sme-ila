@@ -7,7 +7,7 @@
 
 namespace arm {
     
-    // TODO need to change all usage sites
+    // TODO: need to change all usage sites
     #define TEMP_DECODE BoolConst(true)
     #define TEMP_OPCODE 0x01
     #define TEMP_BIT_WIDTH 128
@@ -21,8 +21,8 @@ namespace arm {
     #define DOUBLE 64
     #define QUAD 128
 
-    // NOTE current unit tests assume SVL = 128, since we constrain only 128 bits
-    constexpr NumericType SVL = 128; // NOTE must be >= 128 to support QUAD
+    // NOTE: current unit tests assume SVL = 128, since we constrain only 128 bits
+    constexpr NumericType SVL = 128; // NOTE: must be >= 128 to support QUAD
     constexpr NumericType SVL_B = SVL / BYTE;
     const NumericType LOG2_SVL_B = std::log2(SVL_B);
     constexpr NumericType GPR_COUNT = 31;
@@ -33,10 +33,10 @@ namespace arm {
     const NumericType Z_ADDR_WIDTH = std::log2(Z_REG_COUNT);
     const NumericType Z_REG_WIDTH = SVL;
     constexpr NumericType P_REG_COUNT = 8;
-    // ASK is it truly SVL_B bits? 8 or 16 p-registers for SME??
-    // ASK are they indexed from LSB or MSB?
+    // ASK: is it truly SVL_B bits? 8 or 16 p-registers for SME??
+    // ASK: are they indexed from LSB or MSB?
     const NumericType P_ADDR_WIDTH = std::log2(P_REG_COUNT);
-    const NumericType P_REG_WIDTH = SVL_B; // NOTE current unit tests assume P_REG_WIDTH = 16 since we use 4 hex digits
+    const NumericType P_REG_WIDTH = SVL_B; // NOTE: current unit tests assume P_REG_WIDTH = 16 since we use 4 hex digits
 
 using namespace ilang;
 
@@ -45,10 +45,10 @@ class ArmSme {
     
     void AddInstructions();
 
-    // NOTE convert tile_idx into constrained range: 0 to num_tiles-1
+    // NOTE: convert tile_idx into constrained range: 0 to num_tiles-1
     ExprRef ToConstrainedTileIndex(const ExprRef& tile_idx, const NumericType& esize);
     
-    // NOTE very low-level, does not scale according to element_size_bits
+    // NOTE: very low-level, does not scale according to element_size_bits
     // @return ZA byte memory linear address
     // param[in] row, col must be ZA_ADDR_WIDTH-wide
     ExprRef _ToByteMemoryAddress(const ExprRef& row, const ExprRef& col);
@@ -62,7 +62,7 @@ class ArmSme {
     ExprRef _GetDouble(const ExprRef& mem, const ExprRef& addr);
     ExprRef _GetQuad(const ExprRef& mem, const ExprRef& addr);
     ExprRef GetElementAtAddress(const ExprRef& mem, const ExprRef& addr, const NumericType& element_size_bits);
-    // TODO should've made GetAtRowCol() that uses _ToMemoryAddress() internally
+    // TODO: should've made GetAtRowCol() that uses _ToMemoryAddress() internally
     ExprRef GetElementAtRowCol(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& row, const ExprRef& col, const NumericType& element_size_bits);
     
     // @brief Store single element to ZA memory (does NOT store a whole vector)
@@ -74,22 +74,22 @@ class ArmSme {
     ExprRef _SetDouble(const ExprRef& mem, const ExprRef& addr, const ExprRef& data);
     ExprRef _SetQuad(const ExprRef& mem, const ExprRef& addr, const ExprRef& data);
     ExprRef SetElementAtAddress(const ExprRef& mem, const ExprRef& addr, const NumericType&element_size_bits, const ExprRef& data);
-    // TODO should've made SetAtRowCol() that uses _ToMemoryAddress() internally
+    // TODO: should've made SetAtRowCol() that uses _ToMemoryAddress() internally
     ExprRef SetElementAtRowCol(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& row, const ExprRef& col, const NumericType& element_size_bits, const ExprRef& data);
 
     // @brief will be called by more sophisticated ZA access methods
     // @return Concatenated bytes into a single slice
     // @param[in] tile_idx is the tile we want to access, range [0-SVL_B]
-    // TODO tile_idx MUST BE in range [0, SVL_B-1] during instr decode: WE ACHIEVE THIS BY RESTRICTING THE BIT WIDTH OF THE tile_idx INPUT
+    // TODO: tile_idx MUST BE in range [0, SVL_B-1] during instr decode: WE ACHIEVE THIS BY RESTRICTING THE BIT WIDTH OF THE tile_idx INPUT
     ExprRef _GetTypedHorizontalSlice(const ExprRef& mem, const ExprRef& row_idx, const ExprRef& tile_idx, const NumericType& element_size_bits); // topmost row is index 0
     ExprRef _GetTypedVerticalSlice(const ExprRef& mem, const ExprRef& col_idx, const ExprRef& tile_idx, const NumericType& element_size_bits); // rightmost col is index 0
 
-    // NOTE ZA[N] equivalent to ZA0.B[N] but without Byte element interpretation
+    // NOTE: ZA[N] equivalent to ZA0.B[N] but without Byte element interpretation
     // @param[in] mem the memory state to read from
     // @param[in] is_vertical takes BoolConst(true) or BoolConst(false)
-    // ASK bool or BoolConst?
+    // ASK: bool or BoolConst?
     ExprRef GetTypedSlice(const ExprRef& mem, const ExprRef& is_vertical, const ExprRef& tile_idx, const ExprRef& slice_idx, const NumericType& element_size_bits);
-    // TODO In SME instructions the tile slice is selected by the sum of a 32-bit general-purpose register (slice index register Ws) and an immediate, modulo the number of slices in the named tile.
+    // TODO: In SME instructions the tile slice is selected by the sum of a 32-bit general-purpose register (slice index register Ws) and an immediate, modulo the number of slices in the named tile.
     
     // @return New memory state
     // @param[in] mem the memory state to update
@@ -97,12 +97,12 @@ class ArmSme {
     ExprRef _SetTypedHorizontalSlice(const ExprRef& mem, const ExprRef& row_idx, const ExprRef& tile_idx, const NumericType& element_size_bits, const ExprRef& data); // topmost row is index 0
     ExprRef _SetTypedVerticalSlice(const ExprRef& mem, const ExprRef& col_idx, const ExprRef& tile_idx, const NumericType& element_size_bits, const ExprRef& data); // rightmost col is index 0
 
-    // NOTE ZA[N] equivalent to ZA0.B[N] but without Byte element interpretation
+    // NOTE: ZA[N] equivalent to ZA0.B[N] but without Byte element interpretation
     // @param[in] is_vertical takes BoolConst(true) or BoolConst(false)
-    // ASK bool or BoolConst?
-    // TODO InstrUpdateRegister and InstrUpdateSlice should also have those that support updating an array of registers
+    // ASK: bool or BoolConst?
+    // TODO: InstrUpdateRegister and InstrUpdateSlice should also have those that support updating an array of registers
     void UpdateSingleTypedSlice(InstrRef& instr, const ExprRef& is_vertical, const ExprRef& tile_idx, const ExprRef& slice_idx, const NumericType& element_size_bits, const ExprRef& data);
-    // TODO In SME instructions the tile slice is selected by the sum of a 32-bit general-purpose register (slice index register Ws) and an immediate, modulo the number of slices in the named tile.
+    // TODO: In SME instructions the tile slice is selected by the sum of a 32-bit general-purpose register (slice index register Ws) and an immediate, modulo the number of slices in the named tile.
     
     
     // @brief Concatenates, left-to-right, list of elements into a single bit-vector
@@ -110,57 +110,57 @@ class ArmSme {
     
     // @return Extracted element_size_bits-width element from vector slice [MSB...LSB]
     ExprRef GetElementInVectorFromLSB(const ExprRef& vector, const NumericType& idx, const NumericType& element_size_bits); // rightmost element is index 0
-    // NOTE supports vector_length_bits parameter to mirror vector of any length
+    // NOTE: supports vector_length_bits parameter to mirror vector of any length
     ExprRef GetElementInVectorFromMSB(const ExprRef& vector, const NumericType& idx, const NumericType& element_size_bits, const NumericType& vector_length_bits); // leftmost element is index 0
 
     // @brief Uses GetElementInVectorFromLSB() to extract bit from vector
-    // NOTE pass in BYTE to advance by single bit due to formula actual_idx = idx * (element_size_bits / BYTE)
+    // NOTE: pass in BYTE to advance by single bit due to formula actual_idx = idx * (element_size_bits / BYTE)
     ExprRef GetPredBitFromLSB(const ExprRef& vector, const NumericType& idx, const NumericType& element_size_bits);
     
     // @return New vector where element at idx is replaced with new_element
     ExprRef SetElementInVectorFromLSB(const ExprRef& vector, const NumericType& idx, const NumericType& element_size_bits, const ExprRef& new_element, const NumericType& vector_length_bits); // rightmost element is index 0
     ExprRef SetElementInVectorFromMSB(const ExprRef& vector, const NumericType& idx, const NumericType& element_size_bits, const ExprRef& new_element, const NumericType& vector_length_bits); // leftmost element is index 0
     
-    // TODO (z|p)_idx must be constrained to only describe 0-31 (Z), and 0-15 (P) using Z_ADDR_WIDTH and P_ADDR_WIDTH bits
+    // TODO: (z|p)_idx must be constrained to only describe 0-31 (Z), and 0-15 (P) using Z_ADDR_WIDTH and P_ADDR_WIDTH bits
     // @return Vector register or Predicate register bit-vector
     ExprRef GetVectorRegister(const ExprRef& z_idx);
     ExprRef GetPredicateRegister(const ExprRef& p_idx);
-    // NOTE make sure val's bit-width matches the target register
+    // NOTE: make sure val's bit-width matches the target register
     void UpdateSingleVectorRegister(InstrRef& instr, const ExprRef& z_idx, const ExprRef& val);
     void UpdateSinglePredicateRegister(InstrRef& instr, const ExprRef& p_idx, const ExprRef& val);
     
-    // NOTE return value and write value must be 32-bit or 64-bit respectively
+    // NOTE: return value and write value must be 32-bit or 64-bit respectively
     // @brief use_sp true if SP is used instead of XZR/WZR as GPR[31]
     ExprRef Get32BitGPR(const ExprRef& w_idx); // for W register access
     ExprRef Get64BitGPR(const ExprRef& x_idx, bool use_sp=false); // for X register access
     void UpdateSingle32BitGPR(InstrRef& instr, const ExprRef& w_idx, const ExprRef& val); // perform zero extension before writing to the whole 64-bit X register
     void UpdateSingle64BitGPR(InstrRef& instr, const ExprRef& x_idx, const ExprRef& val, bool use_sp=false);
     
-    // TODO make BaseRegPlusImm(Ws, imm) and returns (Ws+imm), passed into our current helpers that does modulo internally (imm range must be constrained depending on the specific instruction too)
-    // NOTE ARM actually does modulo by using Imm1, Imm2, ..., Imm8 derived from Imm
+    // TODO: make BaseRegPlusImm(Ws, imm) and returns (Ws+imm), passed into our current helpers that does modulo internally (imm range must be constrained depending on the specific instruction too)
+    // NOTE: ARM actually does modulo by using Imm1, Imm2, ..., Imm8 derived from Imm
     ExprRef BaseRegPlusImm(const ExprRef& base_reg, const ExprRef& imm);
     
-    // NOTE source and dest must have same bit-width, predicate from p_regs[p_idx]
+    // NOTE: source and dest must have same bit-width, predicate from p_regs[p_idx]
     // @brief source replaces dest through a predicate mask
     // @return New expression (derived from source) to replace the entirety of dest
     // param[in] is_zero_mode takes: (defaults to merge_mode)
     // - BoolConst(true) source element inactive => destination element is zeroed
     // - BoolConst(false) source element inactive => destination element unmodified
-    // ASK bool or BoolConst?
+    // ASK: bool or BoolConst?
     ExprRef MaskWithSinglePredicate(const ExprRef& source, const ExprRef& dest, const NumericType& element_size_bits, const NumericType& vector_length_bits, const ExprRef& predicate, const ExprRef& is_zero_mode=BoolConst(false));
 
     ExprRef CombineTileWithHorizontalVector(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, const ExprRef& is_zero_mode, std::function<ExprRef(ExprRef old, ExprRef extra)> combine_fn);
     ExprRef CombineTileWithVerticalVector(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, const ExprRef& is_zero_mode, std::function<ExprRef(ExprRef old, ExprRef extra)> combine_fn);
 
-    // NOTE doesn't need (target|source)_element_size_bits since k<4 is fixed
+    // NOTE: doesn't need (target|source)_element_size_bits since k<4 is fixed
     ExprRef IntegerCombineTileWithMatrices(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& pred1, const ExprRef& pred2, const NumericType& element_size_bits, bool sub_instead_of_add, bool op1_unsigned, bool op2_unsigned); // SExt vs ZExt
     
-    // NOTE dotadd_fn must capture the widening logic from src to dest
+    // NOTE: dotadd_fn must capture the widening logic from src to dest
     ExprRef FloatCombineTileWithMatricesK2(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& pred1, const ExprRef& pred2, const NumericType& dest_element_size_bits, const NumericType& src_element_size_bits, bool sub_instead_of_add, const ExprRef& fpzero, const FuncRef& neg_fn, const FuncRef& dotadd_fn);
     ExprRef FloatCombineTileWithMatricesK1(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& pred1, const ExprRef& pred2, const NumericType& element_size_bits, bool sub_instead_of_add, const FuncRef& neg_fn, const FuncRef& fmac_fn);
     
   public:
-    // TODO these need more thought
+    // TODO: these need more thought
     // <pstatefield> is encoded in the following
     // ExprRef Op1;
     // ExprRef Op2;
@@ -171,14 +171,14 @@ class ArmSme {
     // ExprRef Tszl;
     // ExprRef Size;
     
-    // NOTE internal states
+    // NOTE: internal states
     ExprRef za;
     ExprRef pstate_sm;
     ExprRef pstate_za;
     std::vector<ExprRef> z_regs;
-    std::vector<ExprRef> p_regs; // ASK how many P registers? 8 or 16?
+    std::vector<ExprRef> p_regs; // ASK: how many P registers? 8 or 16?
 
-    /** ASK check my understanding
+    /** ASK: check my understanding
      * @note there are 31 64-bit GPRs (X0-X30)
      * @note W registers (32 bit) are lower bits of X registers (64 bit)
      * @note IMPLEMENTATION: no restriction of which W12-W15 registers to access
@@ -192,12 +192,12 @@ class ArmSme {
     ExprRef XZR; // 64-bit zero register
     ExprRef WZR; // 32-bit zero register
     
-    // NOTE Input States
-    // TODO temporarily use mutually exclusive `cmd` codes for instr select
+    // NOTE: Input States
+    // TODO: temporarily use mutually exclusive `cmd` codes for instr select
     ExprRef cmd;
 
     // Tile Selector
-    // NOTE instructions MUST CALL ToConstrainedTileIndex() to get tile_idx
+    // NOTE: instructions MUST CALL ToConstrainedTileIndex() to get tile_idx
     ExprRef ZAda; // destination tile to accumulate to
     ExprRef ZAn; // source tile to move out of
     ExprRef ZAd; // destination tile to move into
@@ -213,7 +213,7 @@ class ArmSme {
     
     // Immediates (signed or unsigned depends on instruction interpretation)
     ExprRef Imm;
-    // NOTE Imm is widest, all ImmN's below are lower-N-bits of Imm
+    // NOTE: Imm is widest, all ImmN's below are lower-N-bits of Imm
     ExprRef Imm1; // (also known as i1)
     ExprRef Imm2;
     ExprRef Imm3;
@@ -232,7 +232,7 @@ class ArmSme {
     ExprRef Zn; // first source
     ExprRef Zm; // second source
     
-    // NOTE Sort Refs
+    // NOTE: Sort Refs
     SortRef bf16;
     SortRef fp64;
     SortRef fp32;
@@ -243,18 +243,18 @@ class ArmSme {
     ExprRef fp16_zero;
     ExprRef bf16_zero;
 
-    // NOTE Uninterpreted Functions
+    // NOTE: Uninterpreted Functions
     FuncRef fpneg64; // negation (FP64 -> FP64)
     FuncRef fpneg32; // negation (FP32 -> FP32)
     FuncRef fpneg16; // negation (FP16 -> FP16)
     FuncRef bfneg16; // negation (BFloat -> BFloat)
     
-    // TODO current implementation Ignores FPCR settings passed into DOTADD
+    // TODO: current implementation Ignores FPCR settings passed into DOTADD
     // Fused Multiply and Accumulate (with no intermediate rounding!)
     FuncRef fpmac64; // FP64 + FP64 * FP64 -> FP64
     FuncRef fpmac32; // FP32 + FP32 * FP32 -> FP32
     
-    // TODO current implementation Ignores FPCR settings passed into DOTADD
+    // TODO: current implementation Ignores FPCR settings passed into DOTADD
     // Fused Dot Product and Accumulate (with no intermediate rounding!)
     // usage: DOTADD(old, {a0, b0, a1, b1}) = old + a0 * b0 + a1 * b1
     FuncRef fpdotadd32to32; // (FP32's @ FP32's) -> FP32

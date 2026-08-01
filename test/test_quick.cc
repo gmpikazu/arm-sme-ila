@@ -4,7 +4,7 @@
 using namespace arm;
 using namespace ilang;
 
-// NOTE scratchpad to test new verification ideas
+// NOTE: scratchpad to test new verification ideas
 void test_quick(ArmSme& sme) {
     CHECK("ZA dump state into CSV", sme, {"ZERO"},
         [&](IlaZ3Unroller &u, z3::solver &s, z3::context &ctx) {

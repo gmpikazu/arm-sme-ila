@@ -76,7 +76,7 @@ This document is aimed to provide viewers with an overview of the implementation
     3. Finally, accumulatively-store the updated data into the state
 - Otherwise, initial naive `read, modify, and accumulate-store` per iteration is too complex for Z3 to solve in a reasonable amount of time because subsequent reads need to consider whether they are reading a previously stored value, causing deeply nested internal `Ite()` branching
 
-# Z3 Timeout Cases and Solutions ( + Confusions marked with TODO)
+# Z3 Timeout Cases and Solutions ( + Confusions marked with TODO:)
 Z3 timed out during `UnrollPathConn` in some cases, below lists the bottlenecks and patterns to address each
 
 ## `CombineTileWith*Vector()`: Storing to somewhere we are about to Load WITHIN the same loop
@@ -107,13 +107,13 @@ ExprRef ArmSme::CombineTileWithHorizontalVector(...) {
 
 ## `IntegerCombineTileWithMatrices`: Innermost loop built an AST with many Load() nodes
 - **insight:** commenting out the `Ite(activated, sum + prod, sum)` fixed the timeout, but why?
-- **problems:** <!-- TODO have not identified all the problems thoroughly, focusing on empirically working solution -->
+- **problems:** <!-- TODO: have not identified all the problems thoroughly, focusing on empirically working solution -->
     1. `sum` is a big AST of `Extract` operations on concatenated `Load` operations where `ZA`, being a `MemState`, is modelled as a functional array (ie., nested `Ite` tree of `Stores`, `addr`, etc)
     2. `sum@1 = Ite(activated, sum@0 + prod, sum@0)` builds an AST where left and right child depends on previous `sum`
     3. `activated` is built from `Extract` operations on `row_pred`, `col_pred` which are also nested `Ite` trees of `p_regs[i]`. Similarly, `op1`, `op2` depend on `vec1`, `vec2` which are also nested `Ite` trees of `z_regs[i]`
 - **solutions (see current code):**
     1. use `sum` sparingly, delegate the complex arithmetic to a newly-instantiated `BvConst(0, element_size_bits)`, that does not come with a big memory tree, and only combine them together at the very end
-    2. pre-extract both `op`s (extract Vector elements and `SExt` or `ZExt`) and predicate bits into an `std::vector` and inner loop only references those pre-extracting `ExprRef`s (optional) <!-- TODO why does this matter? -->
+    2. pre-extract both `op`s (extract Vector elements and `SExt` or `ZExt`) and predicate bits into an `std::vector` and inner loop only references those pre-extracting `ExprRef`s (optional) <!-- TODO: why does this matter? -->
 ```cpp
 // PROBLEMATIC
 ExprRef ArmSme::IntegerCombineTileWithMatrices(...) {

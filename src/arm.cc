@@ -4,12 +4,12 @@ namespace arm {
     ArmSme::ArmSme() :
         m(Ila("arm")),
 
-        // TODO these need more thought
+        // TODO: these need more thought
         // Tszh(m.NewBvInput("Tszh",)1);
         // Tszl(m.NewBvInput("Tszl",)3);
         // Size(m.NewBvInput("Size",)2);
         
-        // NOTE internal states
+        // NOTE: internal states
         za(m.NewMemState("ZA", ZA_ADDR_WIDTH, BYTE)),
         pstate_sm(m.NewBoolState("PSTATE_SM")),
         pstate_za(m.NewBoolState("PSTATE_ZA")),
@@ -18,8 +18,8 @@ namespace arm {
         XZR(BvConst(0, 64)),
         WZR(BvConst(0, 32)),
 
-        // NOTE input states
-        cmd(m.NewBvInput("cmd", TEMP_LARGEST_ADDR_WIDTH)), // TODO TBC
+        // NOTE: input states
+        cmd(m.NewBvInput("cmd", TEMP_LARGEST_ADDR_WIDTH)), // TODO: TBC
 
         ZAda(m.NewBvInput("ZAda", LOG2_SVL_B)),
         ZAn(m.NewBvInput("ZAn", LOG2_SVL_B)),
@@ -27,17 +27,17 @@ namespace arm {
         ZAt(m.NewBvInput("ZAt", LOG2_SVL_B)),
         HV(m.NewBoolInput("HV")),
 
-        // TODO TBC: check each bit width
+        // TODO: TBC: check each bit width
         Rs(m.NewBvInput("Rs", GPR_ADDR_WIDTH)),
         Rv(m.NewBvInput("Rv", GPR_ADDR_WIDTH)),
         Rn(m.NewBvInput("Rn", GPR_ADDR_WIDTH)),
         Rm(m.NewBvInput("Rm", GPR_ADDR_WIDTH)),
         Rd(m.NewBvInput("Rd", GPR_ADDR_WIDTH)),
         
-        Imm(m.NewBvInput("Imm", 8)), // TODO TBC: what is the maximum bits needed?
-        // BUG Imm(0, 0) is not supported, but we need 1-bit
+        Imm(m.NewBvInput("Imm", 8)), // TODO: TBC: what is the maximum bits needed?
+        // BUG: Imm(0, 0) is not supported, but we need 1-bit
         // maybe can model each Imm as different fields
-        // ASK does SelectBit exist? I should've used for step predicate bits then...
+        // ASK: does SelectBit exist? I should've used for step predicate bits then...
         Imm1(SelectBit(Imm, 0)), Imm2((Imm(1, 0))),
         Imm3(Imm(2, 0)), Imm4(Imm(3, 0)),
         Imm6(Imm(5, 0)), Imm8(Imm(7, 0)),
@@ -51,24 +51,24 @@ namespace arm {
         Zn(m.NewBvInput("Zn", Z_ADDR_WIDTH)),
         Zm(m.NewBvInput("Zm", Z_ADDR_WIDTH)),
         
-        // NOTE Sort Refs
-        // ASK bfloat and fp16 should have different format
+        // NOTE: Sort Refs
+        // ASK: bfloat and fp16 should have different format
         bf16(SortRef::BV(16)),
         fp64(SortRef::BV(64)),
         fp32(SortRef::BV(32)),
         fp16(SortRef::BV(16)),
 
-        // ASK bit representation of zero for bfloat
+        // ASK: bit representation of zero for bfloat
         fp32_zero(BvConst(0, 32)),
-        fp16_zero(BvConst(0, 16)), // ASK same value as bf16_zero though
+        fp16_zero(BvConst(0, 16)), // ASK: same value as bf16_zero though
         bf16_zero(BvConst(0, 16)),
         
-        // NOTE Uninterpreted Functions
+        // NOTE: Uninterpreted Functions
         fpneg64("fpneg64", fp64, fp64),
         fpneg32("fpneg32", fp32, fp32),
         fpneg16("fpneg16", fp16, fp16),
         bfneg16("bfneg16", bf16, bf16),
-        // TODO TBC: check the argument sizes below
+        // TODO: TBC: check the argument sizes below
         fpmac64("fpmac64", fp64, {fp64, fp64, fp64}),
         fpmac32("fpmac32", fp32, {fp32, fp32, fp32}),
         fpdotadd32to32("fpdotadd32to32", fp32, {fp32, fp32, fp32, fp32, fp32}),
@@ -149,14 +149,14 @@ namespace arm {
         return Extract(ZExt(row, ZA_ADDR_WIDTH) * BvConst(SVL_B, ZA_ADDR_WIDTH) + ZExt(col, ZA_ADDR_WIDTH), ZA_ADDR_WIDTH-1, 0);
     }
 
-    // NOTE Topmost row is index 0
+    // NOTE: Topmost row is index 0
     ExprRef ArmSme::_GetTypedHorizontalSlice(const ExprRef& mem, const ExprRef& row_idx, const ExprRef& tile_idx, const NumericType& element_size_bits) {
         // dim x dim elements in tile
         NumericType dim = SVL / element_size_bits;
         NumericType num_tiles = SVL_B / dim;
 
         // ARM SME: row_idx % dim (required by ARM)
-        // NOTE log2(dim=1) produces 0, needs separate handling
+        // NOTE: log2(dim=1) produces 0, needs separate handling
         ExprRef wrapped_row_idx = (dim == 1) ? BvConst(0, ZA_ADDR_WIDTH) : ZExt(Extract(row_idx, static_cast<int>(std::log2(dim))-1, 0), ZA_ADDR_WIDTH);
         ExprRef row = ZExt(tile_idx, ZA_ADDR_WIDTH) + wrapped_row_idx * BvConst(num_tiles, ZA_ADDR_WIDTH);
 
@@ -168,7 +168,7 @@ namespace arm {
         return slice;
     }
     
-    // NOTE Rightmost col is index 0
+    // NOTE: Rightmost col is index 0
     ExprRef ArmSme::_GetTypedVerticalSlice(const ExprRef& mem, const ExprRef& col_idx, const ExprRef& tile_idx, const NumericType& element_size_bits) {
         // dim x dim elements in tile
         NumericType dim = SVL / element_size_bits;
@@ -176,7 +176,7 @@ namespace arm {
         ExprRef element_size_bytes = BvConst(element_size_bits / BYTE, ZA_ADDR_WIDTH);
         
         // ARM SME: col_idx % dim (required by ARM)
-        // NOTE log2(dim=1) produces 0, needs separate handling
+        // NOTE: log2(dim=1) produces 0, needs separate handling
         ExprRef wrapped_col_idx = (dim == 1) ? BvConst(0, ZA_ADDR_WIDTH) : ZExt(Extract(col_idx, static_cast<int>(std::log2(dim))-1, 0), ZA_ADDR_WIDTH);
         ExprRef col = (BvConst(SVL_B, ZA_ADDR_WIDTH) - element_size_bytes) - (wrapped_col_idx * element_size_bytes); // (SVL_B - element_size_bytes) gives the column index of the rightmost element, (col_idx * element_size_bytes) moves back col_idx times
         
@@ -203,14 +203,14 @@ namespace arm {
         return GetTypedSlice(mem, BoolConst(true), BvConst(tile_idx, ZA_ADDR_WIDTH), BvConst(col_idx, ZA_ADDR_WIDTH), element_size_bits);
     }
    
-    // NOTE Topmost row is index 0
+    // NOTE: Topmost row is index 0
     ExprRef ArmSme::_SetTypedHorizontalSlice(const ExprRef& mem, const ExprRef& row_idx, const ExprRef& tile_idx, const NumericType& element_size_bits, const ExprRef& data) {
         // dim x dim elements in tile
         NumericType dim = SVL / element_size_bits;
         NumericType num_tiles = SVL_B / dim;
 
         // ARM SME: row_idx % dim (required by ARM)
-        // NOTE log2(dim=1) produces 0, needs separate handling
+        // NOTE: log2(dim=1) produces 0, needs separate handling
         ExprRef wrapped_row_idx = (dim == 1) ? BvConst(0, ZA_ADDR_WIDTH) : ZExt(Extract(row_idx, static_cast<int>(std::log2(dim))-1, 0), ZA_ADDR_WIDTH);
         ExprRef row = ZExt(tile_idx, ZA_ADDR_WIDTH) + wrapped_row_idx * BvConst(num_tiles, ZA_ADDR_WIDTH);
 
@@ -222,7 +222,7 @@ namespace arm {
         return new_mem;
     }
 
-    // NOTE Rightmost col is index 0
+    // NOTE: Rightmost col is index 0
     ExprRef ArmSme::_SetTypedVerticalSlice(const ExprRef& mem, const ExprRef& col_idx, const ExprRef& tile_idx, const NumericType& element_size_bits, const ExprRef& data) {
         // dim x dim elements in tile
         NumericType dim = SVL / element_size_bits;
@@ -230,7 +230,7 @@ namespace arm {
         ExprRef element_size_bytes = BvConst(element_size_bits / BYTE, ZA_ADDR_WIDTH);
         
         // ARM SME: col_idx % dim (required by ARM)
-        // NOTE log2(dim=1) produces 0, needs separate handling
+        // NOTE: log2(dim=1) produces 0, needs separate handling
         ExprRef wrapped_col_idx = (dim == 1) ? BvConst(0, ZA_ADDR_WIDTH) : ZExt(Extract(col_idx, static_cast<int>(std::log2(dim))-1, 0), ZA_ADDR_WIDTH);
         ExprRef col = (BvConst(SVL_B, ZA_ADDR_WIDTH) - element_size_bytes) - (wrapped_col_idx * element_size_bytes); // (SVL_B - element_size_bytes) gives the column index of the rightmost element, (col_idx * element_size_bytes) moves back col_idx times
         
@@ -285,7 +285,7 @@ namespace arm {
         NumericType num_elements = vector_length_bits / element_size_bits;
         if (num_elements == 0) throw std::runtime_error("SetElementInVectorFromLSB(): received no elements, possibly by integer division of input");
 
-        // NOTE edge case where left or right would be an invalid extraction
+        // NOTE: edge case where left or right would be an invalid extraction
         if (num_elements == 1) { // single element fills the entire vector
             return new_element;
         }
@@ -411,8 +411,8 @@ namespace arm {
     }
 
     // =====================================================================================
-    // TODO hor/ver vector combine tile still does not do pre-extracting vector and predicate
-    // TODO can remove zero mode Ite if not needed, but won't affect Z3 complexity that much
+    // TODO: hor/ver vector combine tile still does not do pre-extracting vector and predicate
+    // TODO: can remove zero mode Ite if not needed, but won't affect Z3 complexity that much
     // =====================================================================================
     
     ExprRef ArmSme::CombineTileWithHorizontalVector(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, const ExprRef& is_zero_mode, std::function<ExprRef(ExprRef a, ExprRef b)> combine_fn) {
@@ -485,7 +485,7 @@ namespace arm {
     
     ExprRef ArmSme::IntegerCombineTileWithMatrices(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, bool sub_instead_of_add, bool op1_unsigned, bool op2_unsigned) {
 
-        #if 0 // TODO pre-extract op1 op2
+        #if 0 // TODO: pre-extract op1 op2
         std::vector<ExprRef> vec1_ext;
         std::vector<ExprRef> vec2_ext;
         vec1_ext.reserve(total_sub);
@@ -502,7 +502,7 @@ namespace arm {
         NumericType sub_esize = element_size_bits / 4;
         NumericType vec_num_sub_elem = SVL / sub_esize;
 
-        // NOTE pre-extract the bits from predicate and vectors (since they are deeply nested Ite() trees)
+        // NOTE: pre-extract the bits from predicate and vectors (since they are deeply nested Ite() trees)
         // otherwise, Extract() will construct a whole new tree each time, now we simply reference existing trees
         std::vector<ExprRef> row_bits;
         row_bits.reserve(vec_num_sub_elem);
@@ -525,7 +525,7 @@ namespace arm {
                 auto delta = BvConst(0, element_size_bits); // newly-instantiated
                 // widening dot product (smaller bits into larger bits)
                 for (size_t k = 0; k < 4; k++){
-                    // ASK note sure about predicates, ARM uses `ElemP[esize DIV 4]`
+                    // ASK: note sure about predicates, ARM uses `ElemP[esize DIV 4]`
                     auto activated = (row_bits[4*row+k] != 0) & (col_bits[4*col+k] != 0);
 
                     auto op1 = GetElementInVectorFromLSB(vec1, 4*row+k, sub_esize);
@@ -554,8 +554,8 @@ namespace arm {
     }
     
     // ================================================
-    // TODO below need to use pre-extract predicate bits
-    // BUG below still reuses the same `sum` which will timeout Z3
+    // TODO: below need to use pre-extract predicate bits
+    // BUG: below still reuses the same `sum` which will timeout Z3
     // ================================================
     
     ExprRef ArmSme::FloatCombineTileWithMatricesK2(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& pred1, const ExprRef& pred2, const NumericType& dest_element_size_bits, const NumericType& src_element_size_bits, bool sub_instead_of_add, const ExprRef& fpzero, const FuncRef& neg_fn, const FuncRef& dotadd_fn) {
@@ -581,12 +581,12 @@ namespace arm {
                 auto ecol_0 = Ite(pcol_0, GetElementInVectorFromLSB(vec2, 2*col+0, src_element_size_bits), fpzero);
                 auto ecol_1 = Ite(pcol_1, GetElementInVectorFromLSB(vec2, 2*col+1, src_element_size_bits), fpzero);
 
-                if (sub_instead_of_add){ // ASK can i remove the Ite() check?
+                if (sub_instead_of_add){ // ASK: can i remove the Ite() check?
                     // only need erow_0 and erow_1 to be negated in this case
                     erow_0 = Ite(prow_0, neg_fn(erow_0), erow_0);
                     erow_1 = Ite(prow_1, neg_fn(erow_1), erow_1);
                 }
-                // TODO not sure if predicate logic is right, 'unmodified' is guared by Ite()
+                // TODO: not sure if predicate logic is right, 'unmodified' is guared by Ite()
                 auto any_active = (prow_0 & pcol_0) | (prow_1 & pcol_1);
                 sum = Ite(any_active, dotadd_fn({sum, erow_0, erow_1, ecol_0, ecol_1}), sum);
                 
