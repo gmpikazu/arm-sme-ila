@@ -204,6 +204,40 @@ namespace arm {
             f("FMOPA (non-widening)", ".D", TEMP_OPCODE, DOUBLE, constrained(ZAda, DOUBLE), false, fpneg64, fpmac64);
             f("FMOPS (non-widening)", ".D", TEMP_OPCODE, DOUBLE, constrained(ZAda, DOUBLE), true, fpneg64, fpmac64);
         }
+        { // Typed Loads (not LDR)
+            auto f = [&](std::string name, NumericType opcode, NumericType esize, const ExprRef& tile_idx, const ExprRef imm){
+                InstrRef instr = m.NewInstr(name);
+                auto decode = SME_ON & (cmd == opcode);
+                instr.SetDecode(decode);
+
+                // TODO: base ignores check SP alignment
+                // how would we conditionally run a chunk of ILAng code to check SP alignment?
+                // for now always guarantee SP is aligned
+                auto base = Get64BitGPR(Rn, true); 
+                auto offset = Get64BitGPR(Rm); // NOTE: assembler defaults Rm=31 (XZR) if programmer left it blank
+                auto slice_idx = BaseRegPlusImm(Get32BitGPR(Rs), imm);
+                auto mask = GetPredicateRegister(Pg);
+
+                ExprRef result = BvConst(0, SVL); // init zero vector
+                NumericType dim = SVL / esize;
+                NumericType byte_esize = esize / BYTE;
+                for (size_t i = 0; i < dim; i++) {
+                    auto addr = ZExt(base, DRAM_ADDR_WIDTH) + ZExt(offset, DRAM_ADDR_WIDTH) * BvConst(byte_esize, DRAM_ADDR_WIDTH);
+                    ExprRef loaded = DRAM_GetElementBytes(addr, byte_esize); // using UF must use byte_esize
+                    ExprRef new_elem = Ite(GetPredBitFromLSB(mask, i, esize) != 0, loaded, BvConst(0, esize));
+                    result = SetElementInVectorFromLSB(result, i, esize, new_elem, SVL);
+                    offset = offset + 1;
+                }
+                UpdateSingleTypedSlice(instr, HV, tile_idx, slice_idx, esize, result);
+            };
+            f("LD1.B", TEMP_OPCODE, BYTE, constrained(ZAt, BYTE), Imm4);
+            f("LD1.H", TEMP_OPCODE, HALF, constrained(ZAt, HALF), Imm3);
+            f("LD1.W", TEMP_OPCODE, WORD, constrained(ZAt, WORD), Imm2);
+            f("LD1.D", TEMP_OPCODE, DOUBLE, constrained(ZAt, DOUBLE), Imm1);
+            f("LD1.Q", TEMP_OPCODE, QUAD, constrained(ZAt, QUAD), BvConst(0, 1));
+        }
+        // TODO: LDR, store, STR
+        // then base A64, SVE2 instructions
     }
     
 }  // namespace arm

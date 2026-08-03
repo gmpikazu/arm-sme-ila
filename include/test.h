@@ -10,3 +10,6 @@ void test_mova(arm::ArmSme& sme);
 void test_addha_addva(arm::ArmSme& sme);
 void test_integer_outer_prod(arm::ArmSme& sme);
 void test_spl_svl(arm::ArmSme& sme);
+void test_float_outer_prod(arm::ArmSme& sme);
+void test_load(arm::ArmSme& sme);
+void test_store(arm::ArmSme& sme);

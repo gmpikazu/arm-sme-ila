@@ -1,12 +1,20 @@
 # Project Plan
 ## Crucial Clarification (in meeting)
+- how to model exception throw of `SPAlignmentCheck`, do we need to search for how ARM handles exceptions and save state, exception handler? Or just assume the best case scenario that we always have aligned SP using assertions (SP % 16 == 0 precondition), or update a custom made bool flag for `stack_misaligned`
+    > how to conditionally run an SP alignment check when `Rn` field is passed in as 31??
+> how to constrain UFs, like negating is only flipping first bit of float, or product/sum, without being tedious?
+- loading/storing BYTE,..,QUAD has no alignment check? meaning we can read across cache lines?
+- typed load/store first before `LDR`, `STR`
+
 > Does ZA behave in little endian (rightmost is LSB) when interpreting elements on tile slices?
-- When modelling DRAM load/stores, we need to care about endianness (add a flag parameter)
+- When modelling DRAM load/stores, we need to care about endianness (higher bits are placed near MSB)
 > Arithmetic Instruction with Predicate Masking are non-efficient, solver can't finish 
 ## Remaining Tasks
 - Check ARM pseudocode for Floating Point blackbox instructions (similar to checking `ElemP[]` implementation)
     - eg., neg_fn, fmac_fn, fdotadd_fn, etc
 - Optimize `K2` FP instructions using `delta` then `sum` pattern <!-- TODO: optimizations require checking the true ARM pseuducode to see whether we can split the logic into `delta` and `sum` -->
+- Check each instruction and their inputs for proper `SExt` or `ZExt`
+- Check `ExprRef` arithmetic, make sure they are extended before operation **to prevent truncation**
 - Model load store DRAM (using UFs), SVE2 instructions using <T> field
 - Test edge cases of `XZR`, `WZR` access and write
 - Verify instructions by constructing unit tests, then integration tests (eg., {ZERO, MOVA, SMOPA})

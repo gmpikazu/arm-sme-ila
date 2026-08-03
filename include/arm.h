@@ -37,6 +37,7 @@ namespace arm {
     // ASK: are they indexed from LSB or MSB?
     const NumericType P_ADDR_WIDTH = std::log2(P_REG_COUNT);
     const NumericType P_REG_WIDTH = SVL_B; // NOTE: current unit tests assume P_REG_WIDTH = 16 since we use 4 hex digits
+    const NumericType DRAM_ADDR_WIDTH = 128; // ASK: must be different from fp16, fp32, fp64, else will be treated same as them??
 
 using namespace ilang;
 
@@ -158,6 +159,10 @@ class ArmSme {
     // NOTE: dotadd_fn must capture the widening logic from src to dest
     ExprRef FloatCombineTileWithMatricesK2(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& pred1, const ExprRef& pred2, const NumericType& dest_element_size_bits, const NumericType& src_element_size_bits, bool sub_instead_of_add, const ExprRef& fpzero, const FuncRef& neg_fn, const FuncRef& dotadd_fn);
     ExprRef FloatCombineTileWithMatricesK1(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& pred1, const ExprRef& pred2, const NumericType& element_size_bits, bool sub_instead_of_add, const FuncRef& neg_fn, const FuncRef& fmac_fn);
+
+    // NOTE: addr must be byte address
+    ExprRef DRAM_GetByte(const ExprRef& addr);
+    ExprRef DRAM_GetElementBytes(const ExprRef& addr, const NumericType& byte_esize);
     
   public:
     // TODO: these need more thought
@@ -244,6 +249,7 @@ class ArmSme {
     ExprRef bf16_zero;
 
     // NOTE: Uninterpreted Functions
+    FuncRef DRAM; // use UF to model big DRAM
     FuncRef fpneg64; // negation (FP64 -> FP64)
     FuncRef fpneg32; // negation (FP32 -> FP32)
     FuncRef fpneg16; // negation (FP16 -> FP16)
@@ -275,6 +281,9 @@ class ArmSme {
     ExprRef GetPredicateRegister(size_t p_idx);
     ExprRef Get32BitGPR(size_t w_idx); // for W register access
     ExprRef Get64BitGPR(size_t x_idx, bool use_sp=false); // for X register access
+    
+    ExprRef DRAM_GetByte(size_t addr);
+    ExprRef DRAM_GetElementBytes(size_t addr, const NumericType& byte_esize);
 };
 
 }  // namespace arm

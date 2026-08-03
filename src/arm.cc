@@ -64,6 +64,7 @@ namespace arm {
         bf16_zero(BvConst(0, 16)),
         
         // NOTE: Uninterpreted Functions
+        DRAM("DRAM", SortRef::BV(8), SortRef::BV(DRAM_ADDR_WIDTH)), // addr -> BYTE
         fpneg64("fpneg64", fp64, fp64),
         fpneg32("fpneg32", fp32, fp32),
         fpneg16("fpneg16", fp16, fp16),
@@ -95,6 +96,7 @@ namespace arm {
     
     ExprRef ArmSme::ToConstrainedTileIndex(const ExprRef& tile_idx, const NumericType& esize) {
         if (esize == BYTE) return BvConst(0, 1); // edge case: log2(1)=0 fails
+        if (esize == HALF) return SelectBit(tile_idx, 0); // edge case: Extract(1-1,0) = Extract(0,0)
         // (1): dim = SVL / esize
         // (2): num_tiles = SVL_B / dim
         // SVL_B / (SVL / esize) = (SVL / 8) * (esize / SVL) = esize / 8
@@ -387,6 +389,7 @@ namespace arm {
         // if !use_sp && x_idx == 31: XZR naturally disregarded
     }
     
+    // TODO: check that all Ws+imm wants Unsigned Extension, find reasonable TEMP_LARGEST_ADDR_WIDTH
     ExprRef ArmSme::BaseRegPlusImm(const ExprRef& base_reg_value, const ExprRef& imm) {
         return ZExt(base_reg_value, TEMP_LARGEST_ADDR_WIDTH) + ZExt(imm, TEMP_LARGEST_ADDR_WIDTH);
     }
@@ -636,6 +639,32 @@ namespace arm {
             new_mem = _SetTypedHorizontalSlice(new_mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, element_size_bits, hor_slice);
         }
         return new_mem;
+    }
+
+    ExprRef ArmSme::DRAM_GetByte(const ExprRef& addr) {
+        return DRAM(Extract(addr, DRAM_ADDR_WIDTH-1, 0));
+    }
+    
+    ExprRef ArmSme::DRAM_GetElementBytes(const ExprRef& addr, const NumericType& byte_esize) {
+        assert(byte_esize == 1 || byte_esize == 2 || byte_esize == 4 | byte_esize == 8 | byte_esize == 16);
+        ExprRef result = DRAM_GetByte(addr);
+        for (size_t i = 1; i < byte_esize; i++) {
+            result = Concat(result, DRAM_GetByte(addr+i));
+        }
+        return result;
+    }
+
+    ExprRef ArmSme::DRAM_GetByte(size_t addr) {
+        return DRAM(BvConst(addr, DRAM_ADDR_WIDTH));
+    }
+    
+    ExprRef ArmSme::DRAM_GetElementBytes(size_t addr, const NumericType& byte_esize) {
+        assert(byte_esize == 1 || byte_esize == 2 || byte_esize == 4 | byte_esize == 8 | byte_esize == 16);
+        ExprRef result = DRAM_GetByte(addr);
+        for (size_t i = 1; i < byte_esize; i++) {
+            result = Concat(result, DRAM_GetByte(addr+i));
+        }
+        return result;
     }
     
     std::vector<size_t> ArmSme::GetSliceAddresses(int tile_idx, int slice_idx, bool is_vertical, const NumericType& element_size_bits) {
