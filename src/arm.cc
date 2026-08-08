@@ -283,6 +283,21 @@ namespace arm {
         return SelectBit(vector, actual_idx);
     }
 
+    ExprRef ArmSme::GetPredBitFromLSB(const ExprRef& vector, const ExprRef& idx, const NumericType& element_size_bits) {
+        const NumericType elements = SVL / element_size_bits;
+        assert(elements > 0); // SVL must be greater than element_size_bits
+
+        assert(elements != 1); // ASK: temporary assert to prevent single element
+                                //loop works with single elem BUT log2(1) will fail
+
+        assert(idx.bit_width() <= std::log2(elements)); // idx within bounds by bit-width constraint
+        ExprRef bit = GetPredBitFromLSB(vector, 0, element_size_bits);
+        for (size_t i = 1; i < elements; i++) {
+            bit = Ite(idx == i, GetPredBitFromLSB(vector, i, element_size_bits), bit);
+        }
+        return bit;
+    }
+
     ExprRef ArmSme::SetElementInVectorFromLSB(const ExprRef& vector, const NumericType& idx, const NumericType& element_size_bits, const ExprRef& new_element, const NumericType& vector_length_bits) {
         NumericType num_elements = vector_length_bits / element_size_bits;
         if (num_elements == 0) throw std::runtime_error("SetElementInVectorFromLSB(): received no elements, possibly by integer division of input");
@@ -670,6 +685,7 @@ namespace arm {
     std::vector<size_t> ArmSme::GetSliceAddresses(int tile_idx, int slice_idx, bool is_vertical, const NumericType& element_size_bits) {
         std::vector<size_t> addresses;
         NumericType dim = SVL / element_size_bits;
+        assert(dim % 2 == 0); // must be even for fast modulo to work
         NumericType num_tiles = SVL_B / dim;
         int element_size_bytes = element_size_bits / BYTE;
         

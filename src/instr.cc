@@ -1,4 +1,5 @@
 #include "arm.h"
+#include <cmath>
 
 namespace arm {
 
@@ -238,6 +239,103 @@ namespace arm {
         }
         // TODO: LDR, store, STR
         // then base A64, SVE2 instructions
+        // some decode only need ZA
+
+        { // PSEL
+            auto f = [&](std::string name, NumericType opcode, NumericType esize, const ExprRef imm){
+                InstrRef instr = m.NewInstr(name);
+                auto decode = SME_ON & (cmd == opcode);
+                instr.SetDecode(decode);
+
+                auto operand1 = GetPredicateRegister(Pn); // source
+                auto operand2 = GetPredicateRegister(Pm); // mask
+
+                NumericType elements = SVL / esize; 
+                assert(esize != SVL); // NOTE: no QUAD support in ARM SME, so esize != SVL
+                assert(elements % 2 == 0); // must be even for log2 to be safe
+                auto before_modulo = BaseRegPlusImm(Get32BitGPR(Rv), imm);
+                auto wrapped_index = Extract(before_modulo, std::log2(elements)-1, 0); // lower bits
+
+                auto is_active = (GetPredBitFromLSB(operand2, wrapped_index, esize) != 0); // nested Ite
+                assert(operand1.bit_width() == P_REG_WIDTH && operand1.bit_width() == operand2.bit_width());
+                auto result = Ite(is_active, operand1, BvConst(0, operand1.bit_width()));
+                UpdateSinglePredicateRegister(instr, Pd, result);
+            };
+            f("PSEL.B", TEMP_OPCODE, BYTE, Imm4);
+            f("PSEL.H", TEMP_OPCODE, HALF, Imm3);
+            f("PSEL.W", TEMP_OPCODE, WORD, Imm2);
+            f("PSEL.D", TEMP_OPCODE, DOUBLE, Imm1);
+            // no QUAD support
+        }
+
+        { // REVD.Q
+            InstrRef instr = m.NewInstr("REVD.Q");
+            auto decode = SME_ON & (cmd == TEMP_OPCODE);
+            instr.SetDecode(decode);
+
+            NumericType esize = 128, swsize = 64; // NOTE: fixed for QUAD only
+            NumericType elements = SVL / esize;
+            auto mask = GetPredicateRegister(Pg);
+            auto operand = GetVectorRegister(Zn);
+            auto result = GetVectorRegister(Zd); // will be modified below
+
+            assert(elements > 0); // SVL greater than esize
+            for (size_t i = 0; i < elements; i++) {
+                auto src_elem = GetElementInVectorFromLSB(operand, i, esize);
+                auto high_half = GetElementInVectorFromLSB(src_elem, 1, swsize);
+                auto low_half = GetElementInVectorFromLSB(src_elem, 0, swsize);
+                auto reversed = Concat(low_half, high_half); // swap halves
+                assert(reversed.bit_width() == src_elem.bit_width() && reversed.bit_width() == esize);
+
+                // inactive remains unmodified
+                auto old_dest_elem = GetElementInVectorFromLSB(result, i, esize);
+                auto active = (GetPredBitFromLSB(mask, i, esize) != 0);
+                auto new_elem = Ite(active, reversed, old_dest_elem);
+
+                result = SetElementInVectorFromLSB(result, i, esize, new_elem, SVL);
+            }
+            UpdateSingleVectorRegister(instr, Zd, result);
+        }
+
+        { // CLAMP (signed and unsigned)
+            #define Umax(a, b) Ite(Ugt(a, b), a, b)
+            #define Umin(a, b) Ite(Ult(a, b), a, b)
+            #define Smax(a, b) Ite(Sgt(a, b), a, b)
+            #define Smin(a, b) Ite(Slt(a, b), a, b)
+
+            auto f = [&](std::string name, std::string suffix, NumericType opcode, NumericType esize, bool is_signed) {
+                InstrRef instr = m.NewInstr(name+suffix);
+                auto decode = SME_ON & (cmd == opcode);
+                instr.SetDecode(decode);
+
+                auto min_op = GetVectorRegister(Zn);
+                auto max_op = GetVectorRegister(Zm);
+                auto dest_old = GetVectorRegister(Zd);
+                auto result = BvConst(0, dest_old.bit_width());
+                assert(result.bit_width() == Z_REG_WIDTH);
+
+                NumericType elements = SVL / esize;
+                for (size_t i = 0; i < elements; i++) {
+                    auto min_elem = GetElementInVectorFromLSB(min_op, i, esize);
+                    auto max_elem = GetElementInVectorFromLSB(max_op, i, esize);
+                    auto elem = GetElementInVectorFromLSB(dest_old, i, esize);
+                    
+                    auto res_elem = is_signed ? Smin(Smax(min_elem, elem), max_elem) : Umin(Umax(elem, min_elem), max_elem);
+                    result = SetElementInVectorFromLSB(result, i, esize, res_elem, SVL);
+                }
+                UpdateSingleVectorRegister(instr, Zd, result);
+            };
+            f("SCLAMP", ".B", TEMP_OPCODE, BYTE, true);
+            f("SCLAMP", ".H", TEMP_OPCODE, HALF, true);
+            f("SCLAMP", ".S", TEMP_OPCODE, WORD, true);
+            f("SCLAMP", ".D", TEMP_OPCODE, DOUBLE, true);
+            // no QUAD support for signed
+            f("UCLAMP", ".B", TEMP_OPCODE, BYTE, false);
+            f("UCLAMP", ".H", TEMP_OPCODE, HALF, false);
+            f("UCLAMP", ".S", TEMP_OPCODE, WORD, false);
+            f("UCLAMP", ".D", TEMP_OPCODE, DOUBLE, false);
+            // no QUAD support for unsigned too
+        }
     }
     
 }  // namespace arm

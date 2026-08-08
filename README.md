@@ -18,6 +18,15 @@
 - Model load store DRAM (using UFs), SVE2 instructions using <T> field
 - Test edge cases of `XZR`, `WZR` access and write
 - Verify instructions by constructing unit tests, then integration tests (eg., {ZERO, MOVA, SMOPA})
+## Differences From ARM SME Document
+> No information on `REVD`'s `Reverse(element, swsize)` internal behavior (modelled by assumption instead)
+- A64 instructions like `MSR` and `SMSTART SM` aren't modelled completely down to each bit
+- `Ws`, `Wv` in ARM only selects registers `W12-W15`, but this ILA allows selecting any `W` register
+    - **Solution:** limit `Rs`, `Rv` to 2-bits and prepend `011` in `BasePlusOffset` function
+- Size suffix decoding is the reponsibility of the caller who decides which instruction type (.B .H ..) to execute, the model's ILA behavior does not adjust its logic depending on a `size` `ExprRef` runtime variable:
+    - `SCLAMP`, `UCLAMP` have their `size` suffix (.B .H ..) embedded into the instruction type, hence the ILA behavior does not attempt to compute an `esize` `BvExpr` at runtime since the helper functions require concrete C++ integers
+    - `PSEL` runtime decoding of `i1:tszh:tszl` is left to the caller, the ILA behavior only limits the bit-width of the `Imm` field according to the `size` suffix (.B .H ..) embedded into the instruction type
+        - Replacing `i1:tszh:tszl` immediate extraction with immediates among `Imm1,Imm2,Imm3,Imm4` is valid because the freedom of choosing bits in the immediate is the same (constraining `tszh:tszl` for decode, doesn't constrain the range of immediates that can be used in `imm5<4:>` since `i1` is free)
 ## Delayed Simple Tasks
 - Not all instructions require Streaming SVE Mode, some only need ZA
 - Refactor unit tests to use the new `track_slice()` + `cstr_all_tracked_and_zero()` idiom
