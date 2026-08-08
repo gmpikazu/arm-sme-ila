@@ -12,6 +12,7 @@ namespace arm {
     #define TEMP_OPCODE 0x01
     #define TEMP_BIT_WIDTH 128
     #define TEMP_LARGEST_ADDR_WIDTH 256
+    #define GLOBAL_DO_SWAP true // for endianness
 
     typedef uint64_t NumericType; // same as ilang++.h
 
@@ -20,6 +21,8 @@ namespace arm {
     #define WORD 32
     #define DOUBLE 64
     #define QUAD 128
+
+    constexpr NumericType FAULTS_ADDR_WIDTH = 8; // enough to prevent overflow
 
     // NOTE: current unit tests assume SVL = 128, since we constrain only 128 bits
     constexpr NumericType SVL = 128; // NOTE: must be >= 128 to support QUAD
@@ -54,6 +57,7 @@ class ArmSme {
     // param[in] row, col must be ZA_ADDR_WIDTH-wide
     ExprRef _ToByteMemoryAddress(const ExprRef& row, const ExprRef& col);
     
+    // NOTE: ZA helpers are ONLY FOR ZA, cannot support DRAM due to different endianness
     // @brief Load single element from memory
     // @param[in] mem the memory state to read from
     // @param[in] addr must be aligned to BYTE, HALF, WORD, DOUBLE, QUAD
@@ -118,7 +122,10 @@ class ArmSme {
     // NOTE: pass in BYTE to advance by single bit due to formula actual_idx = idx * (element_size_bits / BYTE)
     ExprRef GetPredBitFromLSB(const ExprRef& vector, const NumericType& idx, const NumericType& element_size_bits);
     ExprRef GetPredBitFromLSB(const ExprRef& vector, const ExprRef& idx, const NumericType& element_size_bits);
-    
+
+    // @return BoolExpr that is an OR between multiple bits
+    ExprRef IsAnyPredActive(const ExprRef& vector, const NumericType& element_size_bits);
+
     // @return New vector where element at idx is replaced with new_element
     ExprRef SetElementInVectorFromLSB(const ExprRef& vector, const NumericType& idx, const NumericType& element_size_bits, const ExprRef& new_element, const NumericType& vector_length_bits); // rightmost element is index 0
     ExprRef SetElementInVectorFromMSB(const ExprRef& vector, const NumericType& idx, const NumericType& element_size_bits, const ExprRef& new_element, const NumericType& vector_length_bits); // leftmost element is index 0
@@ -161,9 +168,13 @@ class ArmSme {
     ExprRef FloatCombineTileWithMatricesK2(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& pred1, const ExprRef& pred2, const NumericType& dest_element_size_bits, const NumericType& src_element_size_bits, bool sub_instead_of_add, const ExprRef& fpzero, const FuncRef& neg_fn, const FuncRef& dotadd_fn);
     ExprRef FloatCombineTileWithMatricesK1(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& pred1, const ExprRef& pred2, const NumericType& element_size_bits, bool sub_instead_of_add, const FuncRef& neg_fn, const FuncRef& fmac_fn);
 
-    // NOTE: addr must be byte address
-    ExprRef DRAM_GetByte(const ExprRef& addr);
-    ExprRef DRAM_GetElementBytes(const ExprRef& addr, const NumericType& byte_esize);
+    // ===== Endianness Matters Here =====
+    ExprRef SwapBytes(const ExprRef& vector, const NumericType& vector_length_bits, bool do_swap);
+
+    // NOTE: DRAM helpers are ONLY FOR DRAM, cannot support ZA due to different endianness
+    ExprRef DRAM_GetByte(const ExprRef& addr); // addr must be byte address
+    ExprRef DRAM_Read(const ExprRef& addr, const NumericType& byte_esize);
+    ExprRef DRAM_Write(const ExprRef& addr, const NumericType& byte_esize, const ExprRef& data);
     
   public:
     // TODO: these need more thought
@@ -176,6 +187,9 @@ class ArmSme {
     // ExprRef Tszh;
     // ExprRef Tszl;
     // ExprRef Size;
+    
+    // NOTE: verification states
+    ExprRef faults; // increments at every exception
     
     // NOTE: internal states
     ExprRef za;
@@ -284,7 +298,7 @@ class ArmSme {
     ExprRef Get64BitGPR(size_t x_idx, bool use_sp=false); // for X register access
     
     ExprRef DRAM_GetByte(size_t addr);
-    ExprRef DRAM_GetElementBytes(size_t addr, const NumericType& byte_esize);
+    ExprRef DRAM_Read(size_t addr, const NumericType& byte_esize);
 };
 
 }  // namespace arm

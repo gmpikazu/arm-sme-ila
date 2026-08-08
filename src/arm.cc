@@ -9,6 +9,9 @@ namespace arm {
         // Tszl(m.NewBvInput("Tszl",)3);
         // Size(m.NewBvInput("Size",)2);
         
+        // NOTE: verification states
+        faults(m.NewBvState("faults", FAULTS_ADDR_WIDTH)), // increments at each fault
+
         // NOTE: internal states
         za(m.NewMemState("ZA", ZA_ADDR_WIDTH, BYTE)),
         pstate_sm(m.NewBoolState("PSTATE_SM")),
@@ -35,9 +38,6 @@ namespace arm {
         Rd(m.NewBvInput("Rd", GPR_ADDR_WIDTH)),
         
         Imm(m.NewBvInput("Imm", 8)), // TODO: TBC: what is the maximum bits needed?
-        // BUG: Imm(0, 0) is not supported, but we need 1-bit
-        // maybe can model each Imm as different fields
-        // ASK: does SelectBit exist? I should've used for step predicate bits then...
         Imm1(SelectBit(Imm, 0)), Imm2((Imm(1, 0))),
         Imm3(Imm(2, 0)), Imm4(Imm(3, 0)),
         Imm6(Imm(5, 0)), Imm8(Imm(7, 0)),
@@ -104,6 +104,7 @@ namespace arm {
         return Extract(tile_idx, std::log2(num_tiles)-1, 0);
     }
 
+    // NOTE: ZA helpers are ONLY FOR ZA, cannot support DRAM due to different endianness
     ExprRef ArmSme::_GetByte(const ExprRef& mem, const ExprRef& addr) { 
         return Load(mem, Extract(addr, ZA_ADDR_WIDTH-1, 0));
     }
@@ -269,6 +270,18 @@ namespace arm {
     ExprRef ArmSme::GetElementInVectorFromMSB(const ExprRef& vector, const NumericType& idx, const NumericType& element_size_bits, const NumericType& vector_length_bits) {
         NumericType mirrored_idx = (vector_length_bits / element_size_bits) - 1 - idx;
         return GetElementInVectorFromLSB(vector, mirrored_idx, element_size_bits);
+    }
+
+    ExprRef ArmSme::IsAnyPredActive(const ExprRef& vector, const NumericType& element_size_bits) {
+        assert(vector.bit_width() == P_REG_WIDTH);
+
+        NumericType elements = SVL / element_size_bits;
+        assert(elements > 0);
+        ExprRef bit = GetPredBitFromLSB(vector, 0, element_size_bits);
+        for (size_t i = 1; i < elements; i++) {
+            bit = (bit | GetPredBitFromLSB(vector, i, element_size_bits));
+        }
+        return bit;
     }
 
     ExprRef ArmSme::GetPredBitFromLSB(const ExprRef& vector, const NumericType& idx, const NumericType& element_size_bits) {
@@ -656,11 +669,29 @@ namespace arm {
         return new_mem;
     }
 
+    // ===== ENDIANNESS MATTERS HERE =====
+    // TODO: for now unused because we write byte-by-byte in LD1/ST1 (LE to BE happens directly)
+    // later on should allocate a buffer, then decide whether to swap, before writing the buffer
+    // should make a GLOBAL_DO_SWAP boolean to easily alter do_swap across codebase
+    ExprRef ArmSme::SwapBytes(const ExprRef& vector, const NumericType& vector_length_bits, bool do_swap) {
+        assert(vector.bit_width() == vector_length_bits);
+        if (!do_swap) { return vector; } // returns original
+
+        ExprRef rightmost = GetElementInVectorFromLSB(vector, 0, BYTE);
+        NumericType num_bytes = vector_length_bits / BYTE;
+        for (size_t i = 1; i < num_bytes; i++) {
+            ExprRef left = GetElementInVectorFromLSB(vector, i, BYTE);
+            rightmost = Concat(rightmost, left); // put all the lefts to the right of rightmost
+        }
+        assert(rightmost.bit_width() == vector_length_bits);
+        return rightmost;
+    }
+
+    // NOTE: DRAM helpers are ONLY FOR DRAM, cannot support ZA due to different endianness
     ExprRef ArmSme::DRAM_GetByte(const ExprRef& addr) {
         return DRAM(Extract(addr, DRAM_ADDR_WIDTH-1, 0));
     }
-    
-    ExprRef ArmSme::DRAM_GetElementBytes(const ExprRef& addr, const NumericType& byte_esize) {
+    ExprRef ArmSme::DRAM_Read(const ExprRef& addr, const NumericType& byte_esize) {
         assert(byte_esize == 1 || byte_esize == 2 || byte_esize == 4 || byte_esize == 8 || byte_esize == 16);
         ExprRef result = DRAM_GetByte(addr);
         for (size_t i = 1; i < byte_esize; i++) {
@@ -668,12 +699,14 @@ namespace arm {
         }
         return result;
     }
-
+    ExprRef ArmSme::DRAM_Write(const ExprRef& addr, const NumericType& byte_esize, const ExprRef& data) {
+        assert(data.bit_width() == byte_esize * BYTE);
+        // TODO:
+    }
     ExprRef ArmSme::DRAM_GetByte(size_t addr) {
         return DRAM(BvConst(addr, DRAM_ADDR_WIDTH));
     }
-    
-    ExprRef ArmSme::DRAM_GetElementBytes(size_t addr, const NumericType& byte_esize) {
+    ExprRef ArmSme::DRAM_Read(size_t addr, const NumericType& byte_esize) {
         assert(byte_esize == 1 || byte_esize == 2 || byte_esize == 4 | byte_esize == 8 | byte_esize == 16);
         ExprRef result = DRAM_GetByte(addr);
         for (size_t i = 1; i < byte_esize; i++) {

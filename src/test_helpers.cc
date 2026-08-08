@@ -236,7 +236,7 @@ void PRINT(const ilang::ExprRef &ila_expr, int step, ilang::IlaZ3Unroller &u, z3
 void CHECK(const std::string& test_name, ArmSme& sme, const std::vector<std::string>& instr_names,
            std::function<void(ilang::IlaZ3Unroller&, z3::solver&, z3::context&)> setup_fn,
            std::function<void(z3::model&, ilang::IlaZ3Unroller&)> verify_fn) {
-    std::cout << "\n=== Test: " << test_name << " ===" << std::endl;
+    std::cout << "\n\n\n=== Test: " << test_name << " ===" << std::endl;
     bool test_passed = true;
     
     // reset failure count for this test
@@ -271,6 +271,9 @@ void CHECK(const std::string& test_name, ArmSme& sme, const std::vector<std::str
         
         // call setup lambda to add constraints AFTER unrolling
         setup_fn(u, s, ctx);
+
+        // NOTE: initialize sme.faults to zero before solving
+        cstr_step(s, u, ctx, sme.faults, ctx.bv_val(0, sme.faults.bit_width()), 0); // step 0
         
         // set timeout (30 seconds)
         z3::params p(ctx);
@@ -281,9 +284,23 @@ void CHECK(const std::string& test_name, ArmSme& sme, const std::vector<std::str
         auto result = s.check();
         
         if (result == z3::sat) {
+
             // call verify lambda with the model
             auto mdl = s.get_model();
             verify_fn(mdl, u);
+
+            // NOTE: ensure no fault occurred throughout execution pipeline
+            std::cout << "--- CHECKING FOR FAULTS ---" << std::endl;
+            for (size_t step = 0; step < 1 + instr_names.size(); step++) { // extra 1 for result step
+                auto got = TO_STR(sme.faults, step, u, mdl);
+                auto expected = TO_STR(BvConst(0, sme.faults.bit_width()), step, u, mdl);
+                bool fault_found = (got != expected);
+                std::cout << "step: " << step << " faults: " << got << " " << std::endl;
+                if (fault_found) {
+                    record_failure("FAULT OCCURRED!!!");
+                }
+            }
+
         } else if (result == z3::unsat) {
             record_failure("Solver returned UNSAT - no valid execution path");
         } else {

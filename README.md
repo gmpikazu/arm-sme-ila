@@ -1,4 +1,21 @@
 # Project Plan
+## TODO
+> dram tests, LDR/STR, memstate for DRAM
+
+## IMPORTANT
+- report about how I handled faults **Faults do not stop the execution of state change**
+- gave up on Store to non MemState, what is better solution? (do we really not want MemStates? why?)
+    - i cant return hashmap since instructions only updates STATES, and i dont know how many different addresses, values, etc the instruction is going to write
+- floating point UFs is terrible to test (tedious to constrain each input/output)
+- double chain svl instructions worked
+- endianness problems (my ZA is BE, but DRAM LE, does it matter? changing this means tests all break)
+- the tests now are a bit hardcoded assuming SVL=128, else it breaks
+
+#### My UFs DRAM Idea:
+- maintain (1) SVL-bit write vector, (2) esize_bits, (3) base+offset that starts the write
+- then in testing, use Z3 to constrain step[i+1] UFs to produce results based on prev write **and** carry over the last couple writes that didnt get overwritten
+- is this enough for what we want to do? it seems more limited than `MemState`
+
 ## Crucial Clarification (in meeting)
 - how to model exception throw of `SPAlignmentCheck`, do we need to search for how ARM handles exceptions and save state, exception handler? Or just assume the best case scenario that we always have aligned SP using assertions (SP % 16 == 0 precondition), or update a custom made bool flag for `stack_misaligned`
     > how to conditionally run an SP alignment check when `Rn` field is passed in as 31??
@@ -9,24 +26,31 @@
 > Does ZA behave in little endian (rightmost is LSB) when interpreting elements on tile slices?
 - When modelling DRAM load/stores, we need to care about endianness (higher bits are placed near MSB)
 > Arithmetic Instruction with Predicate Masking are non-efficient, solver can't finish 
+
 ## Remaining Tasks
+- Unit tests for SVE2 instructions
 - Check ARM pseudocode for Floating Point blackbox instructions (similar to checking `ElemP[]` implementation)
     - eg., neg_fn, fmac_fn, fdotadd_fn, etc
 - Optimize `K2` FP instructions using `delta` then `sum` pattern <!-- TODO: optimizations require checking the true ARM pseuducode to see whether we can split the logic into `delta` and `sum` -->
 - Check each instruction and their inputs for proper `SExt` or `ZExt`
 - Check `ExprRef` arithmetic, make sure they are extended before operation **to prevent truncation**
-- Model load store DRAM (using UFs), SVE2 instructions using <T> field
+- Model load store DRAM (using UFs): `LDR`, `ST1`, `STR` not yet
 - Test edge cases of `XZR`, `WZR` access and write
 - Verify instructions by constructing unit tests, then integration tests (eg., {ZERO, MOVA, SMOPA})
 ## Differences From ARM SME Document
+- Instructions always execute the happy path while `faults` state is incremented when the fault condition is true so state changes still proceed even during fault
+    > `LD1` instructions don't check `ConstrainUnpredictableBool` before checking `SPAlignment`
 > No information on `REVD`'s `Reverse(element, swsize)` internal behavior (modelled by assumption instead)
 - A64 instructions like `MSR` and `SMSTART SM` aren't modelled completely down to each bit
 - `Ws`, `Wv` in ARM only selects registers `W12-W15`, but this ILA allows selecting any `W` register
     - **Solution:** limit `Rs`, `Rv` to 2-bits and prepend `011` in `BasePlusOffset` function
+    - and make `Rs`, `Rv` two bits **NOT ALWAYS 2 bits** need to really check...
 - Size suffix decoding is the reponsibility of the caller who decides which instruction type (.B .H ..) to execute, the model's ILA behavior does not adjust its logic depending on a `size` `ExprRef` runtime variable:
     - `SCLAMP`, `UCLAMP` have their `size` suffix (.B .H ..) embedded into the instruction type, hence the ILA behavior does not attempt to compute an `esize` `BvExpr` at runtime since the helper functions require concrete C++ integers
     - `PSEL` runtime decoding of `i1:tszh:tszl` is left to the caller, the ILA behavior only limits the bit-width of the `Imm` field according to the `size` suffix (.B .H ..) embedded into the instruction type
         - Replacing `i1:tszh:tszl` immediate extraction with immediates among `Imm1,Imm2,Imm3,Imm4` is valid because the freedom of choosing bits in the immediate is the same (constraining `tszh:tszl` for decode, doesn't constrain the range of immediates that can be used in `imm5<4:>` since `i1` is free)
+- The implemented ZA and DRAM is big endian. Though the model is self-consistent (and `PrintZa` still prints according to ARM SME convention), a byte dump between the model's ZA and ARM SME's will differ in endianness
+- TME not modelled for `STR`, `LDR`
 ## Delayed Simple Tasks
 - Not all instructions require Streaming SVE Mode, some only need ZA
 - Refactor unit tests to use the new `track_slice()` + `cstr_all_tracked_and_zero()` idiom
@@ -51,8 +75,33 @@
 This document is aimed to provide viewers with an overview of the implementation specifics of this project
 
 ## Code Conventions
-- Widths and sizes are given in bits (eg., `SVL`, `BYTE`, `HALF`)
+- Widths and sizes are given in bits (eg., `SVL`, `BYTE`, `HALF`, `esize`)
 - `UpdateSingle`-prefixed functions perform `instr.SetUpdate()` internally so **does not** support updating multiple changes at once (use lower-level helpers instead)
+
+## Temporary Quirks
+- `BaseRegPlusImm` extends to `TEMP_LARGEST_ADDR_WIDTH` then the Tile Helpers perform modulo (other helpers perform modulo before calling other functions)
+- The modelled ZA is Big Endian but `LD1` instructions read in Little Endian and place data as Big Endian into ZA (it grab `mbytes` bytes starting at `addr` from low to higher address, placing them from LSB to MSB of the ZA vector)
+```
+// LD1 pseudocode
+for e = 0 to dim - 1
+    addr = base + UInt(offset) * mbytes; 
+    if ElemP[mask, e, esize] == '1' then
+        Elem[result, e, esize] = Mem[addr, mbytes, AccType_SME]; // converts Endianness
+    else 
+        Elem[result, e, esize] = Zeros(); 
+    offset = offset + 1;
+```
+- `Mem[mbytes]` pseudocode of ARM should account for endianness
+- `MemSingle[addr]` of ARM should just grab a single byte, disregarding endianness
+<!-- BUG: Mem[] actually checks endianness, while LDR's MemSingle does not -->
+<!-- BUG: SetElementAtAddress stores MSB first so its Big Endian but we read DRAM as LE, be consistent -->
+
+## DRAM Implementation
+- `DRAM_Read` exists as the model's private helper and public interface for testing ease
+- `DRAM_Write` can be implemented as Store to `MemState` or buffered into `HashMap<addr, val>`
+- Reading and writing is done from lower address to higher address (assumed to be in Little Endian for now)
+- `Read` handles endianness and converts into Big Endian for ZA, `Write` converts ZA's Big Endian to DRAM endianness
+- `GetByte` **does not** care about endianness and is used by `LDR` and `STR` instructions
 
 ## ZA Storage
 **Representation:**
@@ -62,6 +111,7 @@ This document is aimed to provide viewers with an overview of the implementation
 
 **Complying with ARM's Convention:**
 - ARM SME views the matrix with top-right element being index `[0][0]` and bottom-left element being index `[SVL_B-1][SVL_B-1]` (ie., index 0 starts at topmost row or rightmost colummn)
+- This convention is enforced by the helper functions accessing ZA while the internal ZA storage actually has top-left element at index `[0][0]` and bottom-right element at index `[SVL_B-1][SVL_B-1]`
 
 **Helper Functions:**
 - `GetTypedSlice()` and `SetTypedSlice()` uses ARM's convention to access vector slices of tile but internally converts ARM's indexing to C-style pointer arithmetic indexing
@@ -85,6 +135,13 @@ This document is aimed to provide viewers with an overview of the implementation
     1. The conditions to make each particular instruction decode **is automatically generated**
     2. The instructions in the list run one after another forming a connected transition path
 - Observation: if we manually constrain `pstate_sm` or `pstate_za` to false before our SME instruction is supposed to execute, Z3 **cannot auto-generate** conditions to make `SME_ON=true` so, returns `unsat` because instruction can't decode
+- Created a Ctest-inspired `CHECK()` function that performs the necessary setup using a `std::function` argument, then unrolls, and verifies using another `std::function` argument
+
+## Fault Checking
+- Faults are modeled with an additional `faults` state attached to the model that is incremented on each fault
+- For `LDR`, `STR` instructions, misalignment is **always** treated as fault (though ARM says it's optional)
+- For `LD1`, `ST1` instructions, ARM says SP (stack pointer) misalignment is definitely a fault
+- The `CHECK()` function inspects the `faults` state at every step and fails if `faults > 0`
 
 ## Preventing Z3 Garbage Initialization
 - Explicitly constrain all values to prevent Z3 populating them with garbage
