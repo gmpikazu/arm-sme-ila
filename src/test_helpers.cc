@@ -189,11 +189,11 @@ void track_slice(Tracker& tracker, const z3::expr& value_expr, int tile_idx, int
         int col = (SVL_B - element_size_bytes) - (wrapped_col_idx * element_size_bytes);
         
         // bottom up direction for ARM SME vertical slice concatenation behavior
-        for (int i = (int) dim-1; i >= 0; i--) {
+        for (int i = 0; i < dim; i++) {
             size_t row = tile_idx + i * num_tiles;
             size_t base_addr = row * SVL_B + col;
             for (int b = 0; b < element_size_bytes; b++) {
-                tracker.insert_or_assign(base_addr + b, GetVecByteLSB(i * element_size_bytes + b));
+                tracker.insert_or_assign(base_addr + b, GetVecByteMSB((dim-1-i) * element_size_bytes + b));
             }
         }
     } else {

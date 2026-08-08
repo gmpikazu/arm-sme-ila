@@ -661,7 +661,7 @@ namespace arm {
     }
     
     ExprRef ArmSme::DRAM_GetElementBytes(const ExprRef& addr, const NumericType& byte_esize) {
-        assert(byte_esize == 1 || byte_esize == 2 || byte_esize == 4 | byte_esize == 8 | byte_esize == 16);
+        assert(byte_esize == 1 || byte_esize == 2 || byte_esize == 4 || byte_esize == 8 || byte_esize == 16);
         ExprRef result = DRAM_GetByte(addr);
         for (size_t i = 1; i < byte_esize; i++) {
             result = Concat(result, DRAM_GetByte(addr+i));

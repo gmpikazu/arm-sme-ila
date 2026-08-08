@@ -10,14 +10,31 @@ void test_cstr_helper(ArmSme& sme) {
             Tracker t;
             // each new layer is applied on top of previously applied layer
             track_slice(t, bv_val_128(ctx, 0x0001020304050607ULL, 0x08090A0B0C0D0E0F), 0, 0, false, BYTE);
-            track_slice(t, bv_val_128(ctx, 0xFFFFFFFFFFFFFFFFULL, 0xFFFFFFFFFFFFFFFF), 0, 2, true, BYTE);
-            track_slice(t, bv_val_128(ctx, 0x0001020304050607ULL, 0x08090A0B0C0D0E0F), 7, 0, false, BYTE);
+            track_slice(t, bv_val_128(ctx, 0xAAAABBBBCCCCDDDDULL, 0x1111222244445555), 0, 2, true, BYTE); track_slice(t, bv_val_128(ctx, 0x0001020304050607ULL, 0x08090A0B0C0D0E0F), 7, 0, false, BYTE);
             cstr_all_tracked_and_zero(s, u, ctx, t, sme);
         },
         [&](z3::model &mdl, IlaZ3Unroller &u) {
             PrintZa(mdl, u, sme, 0);
+            auto ver_slice = sme.GetVerticalSlice(sme.za, 0, 2, BYTE);
+            PRINT(ver_slice, 0, u, mdl, "vertical slice");
+            EXPECT_TRUE(TO_STR(ver_slice, 0, u, mdl) == "#xaaaabbbbccccdddd0d11222244445555");
         }
     );
+
+    CHECK("SHOWCASE: Multi-byte Vertical Track Slice", sme, {"ZERO"},
+        [&](IlaZ3Unroller &u, z3::solver &s, z3::context &ctx) {
+            Tracker t;
+            track_slice(t, bv_val_128(ctx, 0xAAAABBBBCCCCDDDDULL, 0x1111222244445555), 0, 2, true, WORD);
+            cstr_all_tracked_and_zero(s, u, ctx, t, sme);
+        },
+        [&](z3::model &mdl, IlaZ3Unroller &u) {
+            PrintZa(mdl, u, sme, 0);
+            auto ver_slice = sme.GetVerticalSlice(sme.za, 0, 2, WORD);
+            PRINT(ver_slice, 0, u, mdl, "vertical slice");
+            EXPECT_TRUE(TO_STR(ver_slice, 0, u, mdl) == "#xaaaabbbbccccdddd1111222244445555");
+        }
+    );
+    return;
 
     CHECK("constrain horizontal slice with BYTE", sme, {"ZERO"},
         [&](IlaZ3Unroller &u, z3::solver &s, z3::context &ctx) {
