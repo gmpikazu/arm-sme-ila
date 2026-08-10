@@ -1,18 +1,21 @@
 #pragma once
 
 #include <ilang/ilang++.h>
+#include <stdbool.h>
 #include <cstdint>
 #include <vector>
 #include <cmath>
 
 namespace arm {
     
+    // NOTE: activates MemState DRAM instead of UF for reading
+    #define USE_DRAM_MEMSTATE true
+
     // TODO: need to change all usage sites
     #define TEMP_DECODE BoolConst(true)
     #define TEMP_OPCODE 0x01
     #define TEMP_BIT_WIDTH 128
     #define TEMP_LARGEST_ADDR_WIDTH 256
-    #define GLOBAL_DO_SWAP true // for endianness
 
     typedef uint64_t NumericType; // same as ilang++.h
 
@@ -46,6 +49,8 @@ using namespace ilang;
 
 class ArmSme {
     Ila m;
+    bool ZA_is_LE; // current implementation fixes this to FALSE (since ZA is Big Endian)
+    bool DRAM_is_LE; // NOTE: ZA is Big Endian internally, for now just care about DRAM endianness
     
     void AddInstructions();
 
@@ -153,10 +158,9 @@ class ArmSme {
     // @brief source replaces dest through a predicate mask
     // @return New expression (derived from source) to replace the entirety of dest
     // param[in] is_zero_mode takes: (defaults to merge_mode)
-    // - BoolConst(true) source element inactive => destination element is zeroed
-    // - BoolConst(false) source element inactive => destination element unmodified
-    // ASK: bool or BoolConst?
-    ExprRef MaskWithSinglePredicate(const ExprRef& source, const ExprRef& dest, const NumericType& element_size_bits, const NumericType& vector_length_bits, const ExprRef& predicate, const ExprRef& is_zero_mode=BoolConst(false));
+    // - true: source element inactive => destination element is zeroed
+    // - false: source element inactive => destination element unmodified
+    ExprRef MaskWithSinglePredicate(const ExprRef& source, const ExprRef& dest, const NumericType& element_size_bits, const NumericType& vector_length_bits, const ExprRef& predicate, bool is_zero_mode=false);
 
     ExprRef CombineTileWithHorizontalVector(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, const ExprRef& is_zero_mode, std::function<ExprRef(ExprRef old, ExprRef extra)> combine_fn);
     ExprRef CombineTileWithVerticalVector(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, const ExprRef& is_zero_mode, std::function<ExprRef(ExprRef old, ExprRef extra)> combine_fn);
@@ -169,12 +173,18 @@ class ArmSme {
     ExprRef FloatCombineTileWithMatricesK1(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& pred1, const ExprRef& pred2, const NumericType& element_size_bits, bool sub_instead_of_add, const FuncRef& neg_fn, const FuncRef& fmac_fn);
 
     // ===== Endianness Matters Here =====
-    ExprRef SwapBytes(const ExprRef& vector, const NumericType& vector_length_bits, bool do_swap);
+    ExprRef _SwapBytesInVector(const ExprRef& vector, const NumericType& vector_length_bits, bool do_swap=true);
+    ExprRef BE_to_DRAM_ENDIAN(const ExprRef& vector, const NumericType& vector_length_bits);
+    ExprRef DRAM_ENDIAN_to_BE(const ExprRef& vector, const NumericType& vector_length_bits);
 
     // NOTE: DRAM helpers are ONLY FOR DRAM, cannot support ZA due to different endianness
-    ExprRef DRAM_GetByte(const ExprRef& addr); // addr must be byte address
-    ExprRef DRAM_Read(const ExprRef& addr, const NumericType& byte_esize);
-    ExprRef DRAM_Write(const ExprRef& addr, const NumericType& byte_esize, const ExprRef& data);
+    ExprRef DRAM_GetByteNoEndian(const ExprRef& base_addr); // must be byte address (no endianness for BYTE level)
+    ExprRef DRAM_GetElementAsZaEndian(const ExprRef& base_addr, const NumericType& byte_esize, bool convert_endianness=true); // have endianness
+    ExprRef DRAM_GetVectorAsZaEndian(const ExprRef& base_addr, const NumericType& element_size_bits, bool convert_endianness=true); // SVL bit vector
+    ExprRef DRAM_SetElementNoEndian(const ExprRef mem, const ExprRef& base_addr, const NumericType& byte_esize, const ExprRef& data); // data is ONE multi-byte element, NOT vector of SVL bits
+    // TODO: not DRAM_WriteElement yet since we still update WB_svl_vector which requires SVL bits in one go
+    // writes SVL_B-byte vector starting from base_addr
+    void DRAM_SetVectorAsDramEndian(InstrRef& instr, const ExprRef& base_addr, const ExprRef& vector, const NumericType& element_size_bits, bool convert_endianness=true); // only FALSE for STR instruction
     
   public:
     // TODO: these need more thought
@@ -264,7 +274,6 @@ class ArmSme {
     ExprRef bf16_zero;
 
     // NOTE: Uninterpreted Functions
-    FuncRef DRAM; // use UF to model big DRAM
     FuncRef fpneg64; // negation (FP64 -> FP64)
     FuncRef fpneg32; // negation (FP32 -> FP32)
     FuncRef fpneg16; // negation (FP16 -> FP16)
@@ -282,7 +291,14 @@ class ArmSme {
     FuncRef fpdotadd16to32; // (FP16's @ FP16's) -widened--> FP32
     FuncRef bfdotadd16to32; // (BFloat's @ BFloat's) -widened--> FP32
 
-    ArmSme();
+    // NOTE: DRAM related stuff
+    FuncRef DRAM_UF; // alternative UF to model DRAM
+    ExprRef dram; // defaults to MemState
+    // to catch the address and value of DRAM writes
+    ExprRef WB_svl_vector; // NOTE: is exactly what was written to DRAM (same endianness)
+    ExprRef WB_base_addr;
+
+    ArmSme(bool DRAM_is_LE);
     Ila& get() { return m; }
     
     // public helper functions for tile slices
@@ -297,8 +313,8 @@ class ArmSme {
     ExprRef Get32BitGPR(size_t w_idx); // for W register access
     ExprRef Get64BitGPR(size_t x_idx, bool use_sp=false); // for X register access
     
-    ExprRef DRAM_GetByte(size_t addr);
-    ExprRef DRAM_Read(size_t addr, const NumericType& byte_esize);
+    ExprRef DRAM_GetByteNoEndian(size_t addr);
+    ExprRef DRAM_GetElementNoEndian(size_t addr, const NumericType& byte_esize);
 };
 
 }  // namespace arm

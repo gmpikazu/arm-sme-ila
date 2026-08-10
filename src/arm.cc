@@ -1,8 +1,10 @@
 #include "arm.h"
 
 namespace arm {
-    ArmSme::ArmSme() :
+    ArmSme::ArmSme(bool DRAM_is_LE) :
         m(Ila("arm")),
+        ZA_is_LE(false), // fixed
+        DRAM_is_LE(DRAM_is_LE),
 
         // TODO: these need more thought
         // Tszh(m.NewBvInput("Tszh",)1);
@@ -64,7 +66,6 @@ namespace arm {
         bf16_zero(BvConst(0, 16)),
         
         // NOTE: Uninterpreted Functions
-        DRAM("DRAM", SortRef::BV(8), SortRef::BV(DRAM_ADDR_WIDTH)), // addr -> BYTE
         fpneg64("fpneg64", fp64, fp64),
         fpneg32("fpneg32", fp32, fp32),
         fpneg16("fpneg16", fp16, fp16),
@@ -74,7 +75,14 @@ namespace arm {
         fpmac32("fpmac32", fp32, {fp32, fp32, fp32}),
         fpdotadd32to32("fpdotadd32to32", fp32, {fp32, fp32, fp32, fp32, fp32}),
         fpdotadd16to32("fpdotadd16to32", fp32, {fp32, fp16, fp16, fp16, fp16}),
-        bfdotadd16to32("bfdotadd16to32", fp32, {fp32, bf16, bf16, bf16, bf16})
+        bfdotadd16to32("bfdotadd16to32", fp32, {fp32, bf16, bf16, bf16, bf16}),
+
+        // NOTE: DRAM related (UF and MemState coexist, runtime bool selects which one)
+        DRAM_UF("DRAM UF", SortRef::BV(8), SortRef::BV(DRAM_ADDR_WIDTH)), // addr -> BYTE
+        dram(m.NewMemState("DRAM", DRAM_ADDR_WIDTH, BYTE)),
+        // to catch the address and value of DRAM writes
+        WB_svl_vector(m.NewBvState("WB_svl_vector", SVL)),
+        WB_base_addr(m.NewBvState("WB_base_addr", DRAM_ADDR_WIDTH))
     {
         assert(Z_REG_WIDTH == SVL);
 
@@ -422,20 +430,19 @@ namespace arm {
         return ZExt(base_reg_value, TEMP_LARGEST_ADDR_WIDTH) + ZExt(imm, TEMP_LARGEST_ADDR_WIDTH);
     }
     
-    ExprRef ArmSme::MaskWithSinglePredicate(const ExprRef& source, const ExprRef& dest, const NumericType& element_size_bits, const NumericType& vector_length_bits, const ExprRef& predicate, const ExprRef& is_zero_mode) {
+    // NOTE: safe for source and dest to alias, since result is a new BvConst(0, vector_length_bits)
+    ExprRef ArmSme::MaskWithSinglePredicate(const ExprRef& source, const ExprRef& dest, const NumericType& element_size_bits, const NumericType& vector_length_bits, const ExprRef& predicate, bool is_zero_mode) {
         if (source.bit_width() != dest.bit_width()) throw std::runtime_error("MaskWithSinglePredicate(): source and dest must have same bit-width");
         if (source.bit_width() != vector_length_bits) throw std::runtime_error("MaskWithSinglePredicate(): bit-width must equal vector_length_bits");
 
         NumericType num_elements = vector_length_bits / element_size_bits;
         // move from least-significant element to most-significant element
-        ExprRef result = dest;
+        ExprRef result = BvConst(0, vector_length_bits); // will be completely filled after loop
         for (size_t i = 0; i < num_elements; i++){
             ExprRef source_element = GetElementInVectorFromLSB(source, i, element_size_bits);
             ExprRef dest_element = GetElementInVectorFromLSB(dest, i, element_size_bits);
             ExprRef is_activated = (GetPredBitFromLSB(predicate, i, element_size_bits) != 0);
-            ExprRef new_element = Ite(is_activated, source_element, Ite(
-                is_zero_mode, BvConst(0, element_size_bits), dest_element
-            ));
+            ExprRef new_element = is_zero_mode ? Ite(is_activated, source_element, BvConst(0, element_size_bits)) : Ite(is_activated, source_element, dest_element);
             result = SetElementInVectorFromLSB(result, i, element_size_bits, new_element, vector_length_bits);
         }
         return result;
@@ -670,12 +677,14 @@ namespace arm {
     }
 
     // ===== ENDIANNESS MATTERS HERE =====
-    // TODO: for now unused because we write byte-by-byte in LD1/ST1 (LE to BE happens directly)
-    // later on should allocate a buffer, then decide whether to swap, before writing the buffer
-    // should make a GLOBAL_DO_SWAP boolean to easily alter do_swap across codebase
-    ExprRef ArmSme::SwapBytes(const ExprRef& vector, const NumericType& vector_length_bits, bool do_swap) {
+    // TODO: add this statement to README
+    // NOTE: DRAM read/write helpers will use MSB as lowest starting address
+    // loads will return Big Endian, stores will convert Big Endian to respective DRAM endianness
+    // WB_svl_dram will contain SVL bits exactly as they were written into DRAM with MSB as lowest address
+
+    ExprRef ArmSme::_SwapBytesInVector(const ExprRef& vector, const NumericType& vector_length_bits, bool do_swap) {
         assert(vector.bit_width() == vector_length_bits);
-        if (!do_swap) { return vector; } // returns original
+        if (!do_swap) { return vector; } // do nothing by returning original
 
         ExprRef rightmost = GetElementInVectorFromLSB(vector, 0, BYTE);
         NumericType num_bytes = vector_length_bits / BYTE;
@@ -686,33 +695,100 @@ namespace arm {
         assert(rightmost.bit_width() == vector_length_bits);
         return rightmost;
     }
+    ExprRef ArmSme::BE_to_DRAM_ENDIAN(const ExprRef& vector, const NumericType& vector_length_bits) {
+        bool both_same_endianness = (ZA_is_LE == DRAM_is_LE); // swaps if endianness differs
+        return _SwapBytesInVector(vector, vector_length_bits, !both_same_endianness);
+    }
+    ExprRef ArmSme::DRAM_ENDIAN_to_BE(const ExprRef& vector, const NumericType& vector_length_bits) {
+        return BE_to_DRAM_ENDIAN(vector, vector_length_bits); // same swap function, just different name
+    }
+
+    // TODO: DRAM get/set helpers should take mem as parameter, but for now no need since UFs still exist
 
     // NOTE: DRAM helpers are ONLY FOR DRAM, cannot support ZA due to different endianness
-    ExprRef ArmSme::DRAM_GetByte(const ExprRef& addr) {
-        return DRAM(Extract(addr, DRAM_ADDR_WIDTH-1, 0));
+    ExprRef ArmSme::DRAM_GetByteNoEndian(const ExprRef& addr) {
+    #if USE_DRAM_MEMSTATE
+        return Load(dram, Extract(addr, DRAM_ADDR_WIDTH-1, 0));
+    #else
+        return DRAM_UF(Extract(addr, DRAM_ADDR_WIDTH-1, 0));
+    #endif
     }
-    ExprRef ArmSme::DRAM_Read(const ExprRef& addr, const NumericType& byte_esize) {
+    // NOTE: reads increasing addresses and converts the chunk into Big Endian for return value
+    ExprRef ArmSme::DRAM_GetElementAsZaEndian(const ExprRef& base_addr, const NumericType& byte_esize, bool convert_endianness) {
         assert(byte_esize == 1 || byte_esize == 2 || byte_esize == 4 || byte_esize == 8 || byte_esize == 16);
-        ExprRef result = DRAM_GetByte(addr);
+        NumericType esize = byte_esize * BYTE;
+        ExprRef result = DRAM_GetByteNoEndian(base_addr);
+        auto addr = ZExt(base_addr, DRAM_ADDR_WIDTH);
         for (size_t i = 1; i < byte_esize; i++) {
-            result = Concat(result, DRAM_GetByte(addr+i));
+            result = Concat(result, DRAM_GetByteNoEndian(addr+i)); // expand to higher addresses
+        }
+        assert(result.bit_width() == esize);
+        return convert_endianness ? DRAM_ENDIAN_to_BE(result, esize) : result; // big endian
+    }
+    // NOTE: returns updated MemState after multi-byte accumulated store (NO ENDIAN CONVERSION)
+    // stores each byte one-by-one as exactly [MSB...LSB], starting with MSB at lowest address
+    ExprRef ArmSme::DRAM_SetElementNoEndian(const ExprRef mem, const ExprRef& base_addr, const NumericType& byte_esize, const ExprRef& data) {
+        assert(byte_esize == 1 || byte_esize == 2 || byte_esize == 4 || byte_esize == 8 || byte_esize == 16);
+        NumericType esize = byte_esize * BYTE;
+        assert(data.bit_width() == esize); // data is just one multi-byte element
+        auto addr = ZExt(base_addr, DRAM_ADDR_WIDTH);
+        auto new_dram = mem;
+        for (size_t i = 0; i < byte_esize; i++) {
+            auto byte = GetElementInVectorFromMSB(data, i, BYTE, esize);
+            new_dram = Store(new_dram, addr+i, byte);
+        }
+        return new_dram;
+    }
+    ExprRef ArmSme::DRAM_GetVectorAsZaEndian(const ExprRef& base_addr, const NumericType& element_size_bits, bool convert_endianness) {
+        NumericType elements = SVL / element_size_bits;
+        NumericType byte_esize = element_size_bits / BYTE;
+        ExprRef result = BvConst(0, SVL); // fill be completely filled after the loop
+        auto addr = ZExt(base_addr, DRAM_ADDR_WIDTH); // ZExt prevent overflow
+        for (size_t i = 0; i < elements; i++) {
+            auto dram_elem_za_endian = DRAM_GetElementAsZaEndian(addr, byte_esize, convert_endianness);
+            result = SetElementInVectorFromLSB(result, i, element_size_bits, dram_elem_za_endian, SVL);
+            addr = addr + BvConst(byte_esize, DRAM_ADDR_WIDTH); // increments addr by byte_esize
         }
         return result;
     }
-    ExprRef ArmSme::DRAM_Write(const ExprRef& addr, const NumericType& byte_esize, const ExprRef& data) {
-        assert(data.bit_width() == byte_esize * BYTE);
-        // TODO:
+    // NOTE: takes InstrRef& to update MemState internally, along with extra WB_svl_vector, WB_base_addr
+    // ZA vector arrives in Big Endian [MSB...LSB], we write starting at MSB as lowest address
+    // endian conversion happens per element, DO NOT flip the entire vector, rather flip per element using esize
+    void ArmSme::DRAM_SetVectorAsDramEndian(InstrRef& instr, const ExprRef& base_addr, const ExprRef& vector, const NumericType& element_size_bits, bool convert_endianness) {
+        assert(vector.bit_width() == SVL); // must SVL bits since WB_dram_svl only SVL bits
+        NumericType elements = SVL / element_size_bits;
+        NumericType byte_esize = element_size_bits / BYTE;
+        auto WB_vector = BvConst(0, SVL); // constructed from MSB side
+
+        auto addr = ZExt(base_addr, DRAM_ADDR_WIDTH); // ZExt prevent overflow
+        ExprRef new_dram = dram;
+        for (size_t i = 0; i < elements; i++) {
+            auto src_elem = GetElementInVectorFromLSB(vector, i, element_size_bits); // from LSB according to ARM
+            src_elem = convert_endianness ? BE_to_DRAM_ENDIAN(src_elem, element_size_bits) : src_elem;
+            WB_vector = SetElementInVectorFromMSB(WB_vector, i, element_size_bits, src_elem, SVL); // capture WB
+            new_dram = DRAM_SetElementNoEndian(new_dram, addr, byte_esize, src_elem); // actual store
+            addr = addr + BvConst(byte_esize, DRAM_ADDR_WIDTH);
+        }
+        instr.SetUpdate(dram, new_dram); // store to MemState
+        // capture WB address and SVL bit vector
+        instr.SetUpdate(WB_base_addr, base_addr);
+        instr.SetUpdate(WB_svl_vector, WB_vector); // the WB vector we captured, starting at MSB
     }
-    ExprRef ArmSme::DRAM_GetByte(size_t addr) {
-        return DRAM(BvConst(addr, DRAM_ADDR_WIDTH));
+    ExprRef ArmSme::DRAM_GetByteNoEndian(size_t addr) {
+    #if USE_DRAM_MEMSTATE
+        return Load(dram, addr);
+    #else
+        return DRAM_UF(BvConst(addr, DRAM_ADDR_WIDTH));
+    #endif
     }
-    ExprRef ArmSme::DRAM_Read(size_t addr, const NumericType& byte_esize) {
+    ExprRef ArmSme::DRAM_GetElementNoEndian(size_t addr, const NumericType& byte_esize) {
         assert(byte_esize == 1 || byte_esize == 2 || byte_esize == 4 | byte_esize == 8 | byte_esize == 16);
-        ExprRef result = DRAM_GetByte(addr);
+        ExprRef result = DRAM_GetByteNoEndian(addr);
         for (size_t i = 1; i < byte_esize; i++) {
-            result = Concat(result, DRAM_GetByte(addr+i));
+            result = Concat(result, DRAM_GetByteNoEndian(addr+i)); // expand to higher addresses
         }
-        return result;
+        return result; // BUG: no endian conversion, used by tests to constrain underlying DRAM memory
+                       // or use endian so its easier to constrain?? more natural using BE
     }
     
     std::vector<size_t> ArmSme::GetSliceAddresses(int tile_idx, int slice_idx, bool is_vertical, const NumericType& element_size_bits) {

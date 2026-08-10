@@ -3,7 +3,7 @@
 
 namespace arm {
 
-    // NOTE: esize is BUILT-INTO the instruction using .B .H .W .D .Q suffixes
+    // NOTE: esize is BUILT-INTO the instruction using .B .H .S .D .Q suffixes
     void ArmSme::AddInstructions() {
         { // SMSTART
             InstrRef instr = m.NewInstr("SMSTART");
@@ -39,7 +39,7 @@ namespace arm {
                 auto slice_idx = BaseRegPlusImm(Get32BitGPR(Rs), imm);
                 auto source = GetTypedSlice(za, HV, tile_idx, slice_idx, esize);
                 auto dest = GetVectorRegister(Zd);
-                auto masked = MaskWithSinglePredicate(source, dest, esize, SVL, GetPredicateRegister(Pg), BoolConst(false));
+                auto masked = MaskWithSinglePredicate(source, dest, esize, SVL, GetPredicateRegister(Pg), false);
                 UpdateSingleVectorRegister(instr, Zd, masked);
             };
             f(TEMP_OPCODE, BYTE, ".B", constrained(ZAn, BYTE), Imm4);
@@ -57,7 +57,7 @@ namespace arm {
                 auto slice_idx = BaseRegPlusImm(Get32BitGPR(Rs), imm);
                 auto source = GetVectorRegister(Zn);
                 auto dest = GetTypedSlice(za, HV, tile_idx, slice_idx, esize);
-                auto masked = MaskWithSinglePredicate(source, dest, esize, SVL, GetPredicateRegister(Pg), BoolConst(false));
+                auto masked = MaskWithSinglePredicate(source, dest, esize, SVL, GetPredicateRegister(Pg), false);
                 UpdateSingleTypedSlice(instr, HV, tile_idx, slice_idx, esize, masked);
             };
             f(TEMP_OPCODE, BYTE, ".B", constrained(ZAd, BYTE), Imm4);
@@ -205,41 +205,99 @@ namespace arm {
             f("FMOPA (non-widening)", ".D", TEMP_OPCODE, DOUBLE, constrained(ZAda, DOUBLE), false, fpneg64, fpmac64);
             f("FMOPS (non-widening)", ".D", TEMP_OPCODE, DOUBLE, constrained(ZAda, DOUBLE), true, fpneg64, fpmac64);
         }
-        { // Typed Loads (not LDR)
-            auto f = [&](std::string name, NumericType opcode, NumericType esize, const ExprRef& tile_idx, const ExprRef imm){
+        { // Typed Load & Store (no LDR & STR)
+            typedef std::function<void(InstrRef& instr, const ExprRef& tile_idx, const ExprRef& slice_idx, const ExprRef& mask, const ExprRef& base, ExprRef& offset, const NumericType& esize)> LogicFunc; // modifies instr
+
+            auto f = [&](std::string name, NumericType opcode, NumericType esize, const ExprRef& tile_idx, const ExprRef imm, LogicFunc MainLogic){
                 InstrRef instr = m.NewInstr(name);
                 auto decode = SME_ON & (cmd == opcode);
                 instr.SetDecode(decode);
 
-                // TODO: base ignores check SP alignment
-                // how would we conditionally run a chunk of ILAng code to check SP alignment?
-                // for now always guarantee SP is aligned
-                auto base = Get64BitGPR(Rn, true); 
+                auto base = Get64BitGPR(Rn, true); // returns SP if (n == 31)
                 auto offset = Get64BitGPR(Rm); // NOTE: assembler defaults Rm=31 (XZR) if programmer left it blank
                 auto slice_idx = BaseRegPlusImm(Get32BitGPR(Rs), imm);
                 auto mask = GetPredicateRegister(Pg);
 
-                ExprRef result = BvConst(0, SVL); // init zero vector
-                NumericType dim = SVL / esize;
-                NumericType byte_esize = esize / BYTE;
-                for (size_t i = 0; i < dim; i++) {
-                    auto addr = ZExt(base, DRAM_ADDR_WIDTH) + ZExt(offset, DRAM_ADDR_WIDTH) * BvConst(byte_esize, DRAM_ADDR_WIDTH);
-                    ExprRef loaded = DRAM_GetElementBytes(addr, byte_esize); // using UF must use byte_esize
-                    ExprRef new_elem = Ite(GetPredBitFromLSB(mask, i, esize) != 0, loaded, BvConst(0, esize));
-                    result = SetElementInVectorFromLSB(result, i, esize, new_elem, SVL);
-                    offset = offset + 1;
-                }
-                UpdateSingleTypedSlice(instr, HV, tile_idx, slice_idx, esize, result);
+                // fault checking
+                auto any_active = IsAnyPredActive(mask, esize);
+                auto is_sp = (Rn == 31);
+                auto misaligned_sp = (Extract(SP, 3, 0) != 0); // ASK: is (SP % 16) enough?
+                auto fault_condition = any_active & is_sp & misaligned_sp;
+                instr.SetUpdate(faults, Ite(fault_condition, faults+1, faults));
+
+                // calls the main logic function that completes the instruction
+                MainLogic(instr, tile_idx, slice_idx, mask, base, offset, esize);
             };
-            f("LD1.B", TEMP_OPCODE, BYTE, constrained(ZAt, BYTE), Imm4);
-            f("LD1.H", TEMP_OPCODE, HALF, constrained(ZAt, HALF), Imm3);
-            f("LD1.W", TEMP_OPCODE, WORD, constrained(ZAt, WORD), Imm2);
-            f("LD1.D", TEMP_OPCODE, DOUBLE, constrained(ZAt, DOUBLE), Imm1);
-            f("LD1.Q", TEMP_OPCODE, QUAD, constrained(ZAt, QUAD), BvConst(0, 1));
+            auto LoadLogic = [&](InstrRef& instr, const ExprRef& tile_idx, const ExprRef& slice_idx, const ExprRef& mask, const ExprRef& base, ExprRef& offset, const NumericType& esize){
+                NumericType byte_esize = esize / BYTE;
+                auto base_addr = ZExt(base, DRAM_ADDR_WIDTH) + ZExt(offset, DRAM_ADDR_WIDTH) * BvConst(byte_esize, DRAM_ADDR_WIDTH);
+                // fetch entire SVL bit vector from DRAM as ZA endian, then masks predicate before writing to slice
+                ExprRef dram_vector_as_za_endian = DRAM_GetVectorAsZaEndian(base_addr, esize);
+                dram_vector_as_za_endian = MaskWithSinglePredicate(dram_vector_as_za_endian, dram_vector_as_za_endian, esize, SVL, mask, true); // zeroing logic with predicate
+                UpdateSingleTypedSlice(instr, HV, tile_idx, slice_idx, esize, dram_vector_as_za_endian);
+            };
+            auto StoreLogic = [&](InstrRef& instr, const ExprRef& tile_idx, const ExprRef& slice_idx, const ExprRef& mask, const ExprRef& base, ExprRef& offset, const NumericType& esize){
+                NumericType byte_esize = esize / BYTE;
+                auto base_addr = ZExt(base, DRAM_ADDR_WIDTH) + ZExt(offset, DRAM_ADDR_WIDTH) * BvConst(byte_esize, DRAM_ADDR_WIDTH);
+                ExprRef source_vector = GetTypedSlice(za, HV, tile_idx, slice_idx, esize);
+                ExprRef old_dram_vector_as_za_endian = DRAM_GetVectorAsZaEndian(base_addr, esize);
+                ExprRef result_vector = MaskWithSinglePredicate(source_vector, old_dram_vector_as_za_endian, esize, SVL, mask, false); // merge logic, dest_elem remains same if src_elem not active
+                DRAM_SetVectorAsDramEndian(instr, base_addr, result_vector, esize, true); // convert endianness
+            };
+            // Loads
+            f("LD1.B", TEMP_OPCODE, BYTE, constrained(ZAt, BYTE), Imm4, LoadLogic);
+            f("LD1.H", TEMP_OPCODE, HALF, constrained(ZAt, HALF), Imm3, LoadLogic);
+            f("LD1.S", TEMP_OPCODE, WORD, constrained(ZAt, WORD), Imm2, LoadLogic);
+            f("LD1.D", TEMP_OPCODE, DOUBLE, constrained(ZAt, DOUBLE), Imm1, LoadLogic);
+            f("LD1.Q", TEMP_OPCODE, QUAD, constrained(ZAt, QUAD), BvConst(0, 1), LoadLogic);
+            // Stores
+            f("ST1.B", TEMP_OPCODE, BYTE, constrained(ZAt, BYTE), Imm4, StoreLogic);
+            f("ST1.H", TEMP_OPCODE, HALF, constrained(ZAt, HALF), Imm3, StoreLogic);
+            f("ST1.S", TEMP_OPCODE, WORD, constrained(ZAt, WORD), Imm2, StoreLogic);
+            f("ST1.D", TEMP_OPCODE, DOUBLE, constrained(ZAt, DOUBLE), Imm1, StoreLogic);
+            f("ST1.Q", TEMP_OPCODE, QUAD, constrained(ZAt, QUAD), BvConst(0, 1), StoreLogic);
         }
-        // TODO: LDR, store, STR
-        // then base A64, SVE2 instructions
-        // some decode only need ZA
+
+        { // LDR & STR
+            typedef std::function<void(InstrRef& instr, ExprRef& base_addr, const ExprRef& vec)> LogicFunc; // modifies instr and addr
+
+            auto f = [&](std::string name, NumericType opcode, LogicFunc MainLogic){
+                InstrRef instr = m.NewInstr(name);
+                auto decode = SME_ON & (cmd == opcode);
+                instr.SetDecode(decode);
+
+                NumericType dim = SVL_B;
+                auto base = Get64BitGPR(Rn, true); // returns SP if (n == 31)
+                auto offset = ZExt(Imm4, DRAM_ADDR_WIDTH) * dim; // skips Imm4 rows
+
+                assert(dim % 2 == 0);
+                auto before_modulo = BaseRegPlusImm(Get32BitGPR(Rv), Imm4);
+                auto row = Extract(before_modulo, std::log2(dim)-1, 0); // selects ZA.B row
+
+                auto effective_addr = ZExt(base, DRAM_ADDR_WIDTH) + offset; // modified by MainLogic
+
+                // fault checking (SP & addr)
+                auto is_sp = (Rn == 31);
+                auto misaligned_sp = (Extract(SP, 3, 0) != 0); // ASK: is (SP % 16) enough?
+                auto misaligned_addr = (Extract(effective_addr, 3, 0) != 0);
+                auto fault_condition = (is_sp & misaligned_sp) | misaligned_addr;
+                instr.SetUpdate(faults, Ite(fault_condition, faults+1, faults));
+
+                // calls the main logic function that completes the instruction
+                MainLogic(instr, effective_addr, row);
+            };
+            auto LDR_Logic = [&](InstrRef& instr, ExprRef& base_addr, const ExprRef& row){
+                auto result = DRAM_GetVectorAsZaEndian(base_addr, BYTE, false); // NOTE: no endian conversion
+                ExprRef new_za = _SetTypedHorizontalSlice(za, row, BvConst(0, ZA_ADDR_WIDTH), BYTE, result);
+                instr.SetUpdate(za, new_za);
+            };
+            auto STR_Logic = [&](InstrRef& instr, ExprRef& base_addr, const ExprRef& row){
+                auto source = _GetTypedHorizontalSlice(za, row, BvConst(0, ZA_ADDR_WIDTH), BYTE);
+                DRAM_SetVectorAsDramEndian(instr, base_addr, source, BYTE, false); // NOTE: no endian conversion
+            };
+            f("LDR", TEMP_OPCODE, LDR_Logic);
+            f("STR", TEMP_OPCODE, STR_Logic);
+        }
 
         { // PSEL
             auto f = [&](std::string name, NumericType opcode, NumericType esize, const ExprRef imm){
@@ -263,7 +321,7 @@ namespace arm {
             };
             f("PSEL.B", TEMP_OPCODE, BYTE, Imm4);
             f("PSEL.H", TEMP_OPCODE, HALF, Imm3);
-            f("PSEL.W", TEMP_OPCODE, WORD, Imm2);
+            f("PSEL.S", TEMP_OPCODE, WORD, Imm2);
             f("PSEL.D", TEMP_OPCODE, DOUBLE, Imm1);
             // no QUAD support
         }

@@ -1,6 +1,7 @@
 # Project Plan
 ## TODO
 > dram tests, LDR/STR, memstate for DRAM
+- assume DRAM is Big Endian for now, then also test when DRAM is Little Endian (`GLOBAL_DO_SWAP` bool)
 
 ## IMPORTANT
 - report about how I handled faults **Faults do not stop the execution of state change**
@@ -12,9 +13,29 @@
 - the tests now are a bit hardcoded assuming SVL=128, else it breaks
 
 #### My UFs DRAM Idea:
+1. `Write` updates DRAM `MemState` with `DRAM_ADDR_WIDTH` **and** `wb_svl_vector`, `wb_base_addr` for UFs
+2. `Read` either reads from DRAM `MemState` or UFs controlled by a boolean
 - maintain (1) SVL-bit write vector, (2) esize_bits, (3) base+offset that starts the write
 - then in testing, use Z3 to constrain step[i+1] UFs to produce results based on prev write **and** carry over the last couple writes that didnt get overwritten
 - is this enough for what we want to do? it seems more limited than `MemState`
+
+## Bit Width Truncation ERRORS
+- technically can change to `base_addr` compute first, then each iteration add `offset*byte_esize` but what if bit widths are not enough `offset*byte_esize` and we get errors, this may happen to other instuctions that are not modelled with the EXACT ORDER OF OPERATION according to ARM
+- in our case here `offset` is only 64 bits, so `offset*byte_esize` would probably overflow?
+<!-- BUG: all function taking inputs must interally perform extension to prevent truncation -->
+```cpp
+for (size_t i = 0; i < dim; i++) {
+    auto addr = ZExt(base, DRAM_ADDR_WIDTH) + ZExt(offset, DRAM_ADDR_WIDTH) * BvConst(byte_esize, DRAM_ADDR_WIDTH);
+    ExprRef src_elem = GetElementInVectorFromLSB(source, i, esize);
+    ExprRef old_dram_elem = DRAM_Read(addr, byte_esize); // using UF must use byte_esize
+    // NOTE: LE->BE
+    old_dram_elem = SwapBytes(old_dram_elem, esize, GLOBAL_DO_SWAP);
+    auto active = (GetPredBitFromLSB(mask, i, esize) != 0);
+    ExprRef new_write_elem = Ite(active, src_elem, old_dram_elem);
+    source = SetElementInVectorFromLSB(source, i, esize, new_write_elem, SVL);
+    offset = offset + 1;
+}
+```
 
 ## Crucial Clarification (in meeting)
 - how to model exception throw of `SPAlignmentCheck`, do we need to search for how ARM handles exceptions and save state, exception handler? Or just assume the best case scenario that we always have aligned SP using assertions (SP % 16 == 0 precondition), or update a custom made bool flag for `stack_misaligned`
@@ -38,6 +59,7 @@
 - Test edge cases of `XZR`, `WZR` access and write
 - Verify instructions by constructing unit tests, then integration tests (eg., {ZERO, MOVA, SMOPA})
 ## Differences From ARM SME Document
+- Store instructions always write to memory regardless of `active` predicate, it's just that `inactive` elements are written exactly as they were initially in DRAM. ARM says `inactive` elements shouldn't write memory (but in this case the memory was updated to its initial value so does it matter?)
 - Instructions always execute the happy path while `faults` state is incremented when the fault condition is true so state changes still proceed even during fault
     > `LD1` instructions don't check `ConstrainUnpredictableBool` before checking `SPAlignment`
 > No information on `REVD`'s `Reverse(element, swsize)` internal behavior (modelled by assumption instead)

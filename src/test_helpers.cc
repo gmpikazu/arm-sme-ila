@@ -42,6 +42,13 @@ void cstr_step(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const i
     s.add(expr == value_expr);
 }
 
+// ILA States
+void cstr_step_ila(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const ilang::ExprRef &ila_expr1, int step1, const ilang::ExprRef &ila_expr2, int step2) {
+    auto expr1 = u.GetZ3Expr(ila_expr1, step1);
+    auto expr2 = u.GetZ3Expr(ila_expr2, step2);
+    s.add(expr1 == expr2);
+}
+
 // Create a 128-bit Z3 expression from two 64-bit halves
 z3::expr bv_val_128(z3::context &ctx, uint64_t high_half, uint64_t low_half) {
     return z3::concat(ctx.bv_val(high_half, 64), ctx.bv_val(low_half, 64));

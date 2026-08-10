@@ -66,6 +66,7 @@ void cstr_step_int(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, con
 // NOTE: only supports 64 bit length, for bigger lengths just use cstr_step and ctx.concat(bv_val(),bv_val()) manually
 void cstr_step_bv(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const ilang::ExprRef &ila_expr, uint64_t value, size_t bit_width, int step=0);
 void cstr_step(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const ilang::ExprRef &ila_expr, const z3::expr &value_expr, int step=0);
+void cstr_step_ila(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const ilang::ExprRef &ila_expr1, int step1, const ilang::ExprRef &ila_expr2, int step2);
 // --------------------------------------------------------------
 
 // --------------------------------------------------------------
