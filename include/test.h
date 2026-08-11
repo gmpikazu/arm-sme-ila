@@ -11,5 +11,6 @@ void test_addha_addva(arm::ArmSme& sme);
 void test_integer_outer_prod(arm::ArmSme& sme);
 void test_spl_svl(arm::ArmSme& sme);
 void test_float_outer_prod(arm::ArmSme& sme);
-void test_load(arm::ArmSme& sme);
-void test_store(arm::ArmSme& sme);
+// needs both LE and BE DRAM implementations for testing
+void test_load(arm::ArmSme& sme_DramLE, arm::ArmSme& sme_DramBE);
+void test_store(arm::ArmSme& sme_DramLE, arm::ArmSme& sme_DramBE);

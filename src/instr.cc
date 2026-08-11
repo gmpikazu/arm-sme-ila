@@ -233,7 +233,7 @@ namespace arm {
                 auto base_addr = ZExt(base, DRAM_ADDR_WIDTH) + ZExt(offset, DRAM_ADDR_WIDTH) * BvConst(byte_esize, DRAM_ADDR_WIDTH);
                 // fetch entire SVL bit vector from DRAM as ZA endian, then masks predicate before writing to slice
                 ExprRef dram_vector_as_za_endian = DRAM_GetVectorAsZaEndian(base_addr, esize);
-                dram_vector_as_za_endian = MaskWithSinglePredicate(dram_vector_as_za_endian, dram_vector_as_za_endian, esize, SVL, mask, true); // zeroing logic with predicate
+                dram_vector_as_za_endian = MaskWithSinglePredicate(dram_vector_as_za_endian, BvConst(0, SVL), esize, SVL, mask, true); // zero mode masking logic controlled by bool, BvConst(0, SVL) doesn't matter
                 UpdateSingleTypedSlice(instr, HV, tile_idx, slice_idx, esize, dram_vector_as_za_endian);
             };
             auto StoreLogic = [&](InstrRef& instr, const ExprRef& tile_idx, const ExprRef& slice_idx, const ExprRef& mask, const ExprRef& base, ExprRef& offset, const NumericType& esize){

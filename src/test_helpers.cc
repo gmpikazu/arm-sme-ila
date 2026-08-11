@@ -1,7 +1,10 @@
+#include <cmath>
 #include <iostream>
 #include <iomanip>
+#include <chrono>
 #include "../include/test_helpers.h"
 #include "../include/arm.h"
+#include "ilang/ilang++.h"
 
 namespace arm {
 
@@ -43,10 +46,11 @@ void cstr_step(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const i
 }
 
 // ILA States
-void cstr_step_ila(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const ilang::ExprRef &ila_expr1, int step1, const ilang::ExprRef &ila_expr2, int step2) {
+void cstr_step_ila(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const ilang::ExprRef &ila_expr1, int step1, const ilang::ExprRef &ila_expr2, int step2, bool equal) {
     auto expr1 = u.GetZ3Expr(ila_expr1, step1);
     auto expr2 = u.GetZ3Expr(ila_expr2, step2);
-    s.add(expr1 == expr2);
+    if (equal) { s.add(expr1 == expr2); }
+    else { s.add(expr1 != expr2); }
 }
 
 // Create a 128-bit Z3 expression from two 64-bit halves
@@ -70,6 +74,44 @@ ilang::ExprRef GetByteAtRowCol(ArmSme& sme, int row, int col) {
     // ZA linear memory layout: row-major, each row = SVL_B bytes
     // address = row * SVL_B + col
     return Load(sme.za, BvConst(row * SVL_B + col, sme.za.addr_width()));
+}
+
+#define MAX_BYTES_PER_LINE 16
+void PrintDRAM(z3::model &mdl, ilang::IlaZ3Unroller &u, ArmSme& sme, int start_addr, int step, int num_bytes) {
+    // top border
+    for (int i = 0; i < MAX_BYTES_PER_LINE*5; i++) { std::cout << "-"; }
+    std::cout << std::endl << " DRAM - Step " << step << std::endl;
+    for (int i = 0; i < MAX_BYTES_PER_LINE*5; i++) { std::cout << "-"; }
+    std::cout << std::endl;
+
+    // segmenting num_bytes using MAX_BYTES_PER_LINE
+    int addr = start_addr;
+    int remaining_bytes = num_bytes;
+    while (addr < start_addr + num_bytes) {
+        // TODO: find more descriptive name
+        auto upper_bound = std::min(remaining_bytes, MAX_BYTES_PER_LINE);
+        
+        // print addresses
+        for (int i = 0; i < upper_bound; i++) {
+            std::cout << " " << std::left << std::setw(4) << (addr + i);
+        }
+        std::cout << std::endl;
+
+        // print DRAM bytes
+        for (int i = 0; i < upper_bound; i++) {
+            auto byte = sme.DRAM_GetByteNoEndian(addr + i);
+            std::string val = mdl.eval(u.GetZ3Expr(byte, step)).to_string();
+            std::cout << " " << std::setw(4) << val;
+        }
+        std::cout << std::endl;
+
+        // low border
+        for (int i = 0; i < MAX_BYTES_PER_LINE*5; i++) { std::cout << "-"; }
+        std::cout << std::endl;
+
+        addr += MAX_BYTES_PER_LINE;
+        remaining_bytes -= MAX_BYTES_PER_LINE;
+    }
 }
 
 // Print ZA in a formatted ASCII table
@@ -237,7 +279,7 @@ std::string TO_STR(const ilang::ExprRef &ila_expr, int step, ilang::IlaZ3Unrolle
 void PRINT(const ilang::ExprRef &ila_expr, int step, ilang::IlaZ3Unroller &u, z3::model &mdl, std::string label) {
     auto expr = u.GetZ3Expr(ila_expr, step);
     auto eval = mdl.eval(expr);
-    std::cout << " |> \"" << label << "\" : " << eval.to_string() << std::endl;
+    std::cout << "LOG[\"" << label << "\"] : " << eval.to_string() << std::endl;
 }
 
 void CHECK(const std::string& test_name, ArmSme& sme, const std::vector<std::string>& instr_names,
@@ -248,7 +290,14 @@ void CHECK(const std::string& test_name, ArmSme& sme, const std::vector<std::str
     
     // reset failure count for this test
     g_current_failures = 0;
-    
+
+    // print instruction pipeline (to ensure correct instruction was passed into std::vector)
+    std::cout << "  [INSTRUCTIONS] start --> ";
+    for (size_t i = 0; i < instr_names.size(); i++) {
+        std::cout << instr_names[i] << " --> ";
+    }
+    std::cout << "done" << std::endl;
+
     try {
         ilang::Ila m = sme.get();
         
@@ -272,12 +321,17 @@ void CHECK(const std::string& test_name, ArmSme& sme, const std::vector<std::str
         ilang::IlaZ3Unroller u(ctx);
         z3::solver s(ctx);
         
+        using clk = std::chrono::high_resolution_clock;
+        auto t0 = clk::now();
+
         // unroll the instruction path FIRST
         auto tr = u.UnrollPathConn(instrs, 0);
         s.add(tr);
-        
+        auto t1 = clk::now();
+
         // call setup lambda to add constraints AFTER unrolling
         setup_fn(u, s, ctx);
+        auto t2 = clk::now();
 
         // NOTE: initialize sme.faults to zero before solving
         cstr_step(s, u, ctx, sme.faults, ctx.bv_val(0, sme.faults.bit_width()), 0); // step 0
@@ -289,12 +343,18 @@ void CHECK(const std::string& test_name, ArmSme& sme, const std::vector<std::str
         
         // solve
         auto result = s.check();
-        
+        auto t3 = clk::now();
+
+        auto ms = [](auto a, auto b){ return (int)std::chrono::duration_cast<std::chrono::milliseconds>(b-a).count(); };
+        std::cout << "  [TIME] unroll=" << ms(t0,t1) << "ms  setup=" << ms(t1,t2) << "ms  solve=" << ms(t2,t3) << "ms" << std::endl;
+
         if (result == z3::sat) {
 
             // call verify lambda with the model
             auto mdl = s.get_model();
             verify_fn(mdl, u);
+            auto t4 = clk::now();
+            std::cout << "  [TIME] verify+print=" << ms(t3,t4) << "ms" << std::endl;
 
             // NOTE: ensure no fault occurred throughout execution pipeline
             std::cout << "--- CHECKING FOR FAULTS ---" << std::endl;

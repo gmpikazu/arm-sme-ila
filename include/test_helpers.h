@@ -66,7 +66,7 @@ void cstr_step_int(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, con
 // NOTE: only supports 64 bit length, for bigger lengths just use cstr_step and ctx.concat(bv_val(),bv_val()) manually
 void cstr_step_bv(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const ilang::ExprRef &ila_expr, uint64_t value, size_t bit_width, int step=0);
 void cstr_step(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const ilang::ExprRef &ila_expr, const z3::expr &value_expr, int step=0);
-void cstr_step_ila(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const ilang::ExprRef &ila_expr1, int step1, const ilang::ExprRef &ila_expr2, int step2);
+void cstr_step_ila(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const ilang::ExprRef &ila_expr1, int step1, const ilang::ExprRef &ila_expr2, int step2, bool equal=true);
 // --------------------------------------------------------------
 
 // --------------------------------------------------------------
@@ -84,6 +84,7 @@ ilang::ExprRef GetByteAtRowCol(ArmSme& sme, int row, int col);
 // Print ZA in a formatted ASCII table (dark mode friendly)
 // step parameter allows inspection at any timestep (default: step 0)
 // Format: row 0 at top, column 0 at left, each cell shows hex value
+void PrintDRAM(z3::model &mdl, ilang::IlaZ3Unroller &u, ArmSme& sme, int start_addr, int step, int num_bytes);
 void PrintZa(z3::model &mdl, ilang::IlaZ3Unroller &u, ArmSme& sme, int step=0);
 void InitZaToZero(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, ArmSme& sme, int step=0);
 

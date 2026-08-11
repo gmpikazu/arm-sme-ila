@@ -1,7 +1,8 @@
 # Project Plan
 ## TODO
 > dram tests, LDR/STR, memstate for DRAM
-- assume DRAM is Big Endian for now, then also test when DRAM is Little Endian (`GLOBAL_DO_SWAP` bool)
+- what is difference between `s.add(u.GetZ3Expr() == cstr)` and `u.AddStepPred() + u.Unroll`?
+- why want use UFs for DRAM? we cant constrain future loads to load what we stored if use WB_svl_vec
 
 ## IMPORTANT
 - report about how I handled faults **Faults do not stop the execution of state change**
@@ -242,5 +243,25 @@ ExprRef ArmSme::IntegerCombineTileWithMatrices(...) {
         new_mem = _SetTypedHorizontalSlice(new_mem, BvConst(row, ZA_ADDR_WIDTH), tile_idx, element_size_bits, hor_slice);
     }
     return new_mem;
+}
+```
+
+## `MaskWithSinglePredicate`: Each call to `SetElementInVector` inside a loop performs `Extract` and `Concat`, future `SetElementInVector` has to traverse nested `Extract`-`Concat` trees
+- **problem:** future iterations that call `SetElementInVector` performs `Extract` and `Concat` on a `BvExpr` that is already a compounded `Extract`-`Concat` tree. Even if this `BvExpr` was originally set to `BvConst(0, vector_length_bits)`, the operations compounded into a big AST expression
+- **solution (see current code):** store an `std::vector<ExprRef>` containing the elements of the new vector, then build it using `Concatenate(std::vector)` to get a `BvExpr` without deep trees
+- **note:** this bottleneck exists in multiple helper functions but Z3 timeout first appeared during `MaskWithSinglePredicate` on DRAM-related vectors (`CombineTileWith*Vector` and other helpers also have repeated `SetElementInVector` pattern but is not currently a major issue)
+```cpp
+// PROBLEMATIC
+ExprRef ArmSme::MaskWithSinglePredicate(...) {
+    NumericType num_elements = vector_length_bits / element_size_bits;
+    ExprRef result = BvConst(0, vector_length_bits);
+    for (size_t i = 0; i < num_elements; i++){
+        ExprRef source_element = GetElementInVectorFromLSB(source, i, element_size_bits);
+        ExprRef dest_element = GetElementInVectorFromLSB(dest, i, element_size_bits);
+        ExprRef is_activated = (GetPredBitFromLSB(predicate, i, element_size_bits) != 0);
+        auto new_elem = is_zero_mode ? Ite(is_activated, source_element, BvConst(0, element_size_bits)) : Ite(is_activated, source_element, dest_element);
+        result = SetElementInVectorFromLSB(result, i, element_size_bits, new_elem); // 1. performs extract concat
+    }
+    return result; // 2. compounded extract-concat tree
 }
 ```

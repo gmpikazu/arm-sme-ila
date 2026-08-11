@@ -2,6 +2,7 @@
 #include "test.h"
 #include "test_helpers.h"
 #include <iostream>
+#include <glog/logging.h> // supress ILAng logging for DRAM test using UFs
 
 /** Multipurpose Main Function
  * to build the model and check that new instructions or states were added correctly
@@ -32,20 +33,33 @@ void list_states(ArmSme& sme) {
 }
 
 int main() {
-    ArmSme sme;
+    fLI::FLAGS_minloglevel = 2; // NOTE: remove noisy ILAng logs
+
+    // NOTE: only DRAM tests require both, others don't matter
+    ArmSme sme_DramLE(true); // DRAM is Little Endian
+    ArmSme sme_DramBE(false); // DRAM is Big Endian
     
     // list everything
-    list_states(sme);
-    list_instrs(sme);
+    list_states(sme_DramLE);
+    list_instrs(sme_DramLE);
     
     // instruction unit tests
-    // test_quick(sme);
-    test_pstate(sme);
-    // test_cstr_helper(sme);
-    // test_slice_helper(sme);
-    test_zero(sme);
-    test_mova(sme);
-    test_addha_addva(sme);
+    // test_quick(sme_DramLE);
+
+    // NOTE: tested and working
+    // test_pstate(sme_DramLE);
+    // test_cstr_helper(sme_DramLE);
+    // test_slice_helper(sme_DramLE);
+    // test_zero(sme_DramLE);
+    // test_mova(sme_DramLE);
+    // test_addha_addva(sme_DramLE);
+    // test_integer_outer_prod(sme_DramLE);
+    // test_spl_svl(sme_DramLE);
+
+    // NOTE: under development
+    // test_float_outer_prod(sme_DramLE);
+    // test_load(sme_DramLE, sme_DramBE);
+    test_store(sme_DramLE, sme_DramBE);
     
     // summary
     print_test_summary();

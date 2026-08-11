@@ -436,16 +436,16 @@ namespace arm {
         if (source.bit_width() != vector_length_bits) throw std::runtime_error("MaskWithSinglePredicate(): bit-width must equal vector_length_bits");
 
         NumericType num_elements = vector_length_bits / element_size_bits;
-        // move from least-significant element to most-significant element
-        ExprRef result = BvConst(0, vector_length_bits); // will be completely filled after loop
+        std::vector<ExprRef> elems; // extract elements into std::vector instead of BvExpr
+        elems.reserve(num_elements); // to prevent deeply nested Concat,Extract due to SetElementInVector
         for (size_t i = 0; i < num_elements; i++){
             ExprRef source_element = GetElementInVectorFromLSB(source, i, element_size_bits);
             ExprRef dest_element = GetElementInVectorFromLSB(dest, i, element_size_bits);
             ExprRef is_activated = (GetPredBitFromLSB(predicate, i, element_size_bits) != 0);
-            ExprRef new_element = is_zero_mode ? Ite(is_activated, source_element, BvConst(0, element_size_bits)) : Ite(is_activated, source_element, dest_element);
-            result = SetElementInVectorFromLSB(result, i, element_size_bits, new_element, vector_length_bits);
+            elems.push_back(is_zero_mode ? Ite(is_activated, source_element, BvConst(0, element_size_bits)) : Ite(is_activated, source_element, dest_element)); // no push_front for std::vector, so use std::reverse afterwards
         }
-        return result;
+        std::reverse(elems.begin(), elems.end()); // reverse since we wanted to fill from LSB to MSB
+        return Concatenate(elems);
     }
 
     // =====================================================================================
@@ -683,17 +683,18 @@ namespace arm {
     // WB_svl_dram will contain SVL bits exactly as they were written into DRAM with MSB as lowest address
 
     ExprRef ArmSme::_SwapBytesInVector(const ExprRef& vector, const NumericType& vector_length_bits, bool do_swap) {
-        assert(vector.bit_width() == vector_length_bits);
-        if (!do_swap) { return vector; } // do nothing by returning original
+        assert(vector.bit_width() == vector_length_bits && vector_length_bits % BYTE == 0);
+        if (!do_swap || vector.bit_width() == BYTE) { return vector; } // do nothing by returning original
 
-        ExprRef rightmost = GetElementInVectorFromLSB(vector, 0, BYTE);
         NumericType num_bytes = vector_length_bits / BYTE;
-        for (size_t i = 1; i < num_bytes; i++) {
-            ExprRef left = GetElementInVectorFromLSB(vector, i, BYTE);
-            rightmost = Concat(rightmost, left); // put all the lefts to the right of rightmost
+        std::vector<ExprRef> bytes; // store in std::vector instead of calling SetElementInVector on BvExpr
+        bytes.reserve(num_bytes);
+        for (size_t i = 0; i < num_bytes; i++) { // push_back starting at LSB naturally reverses the vector
+            bytes.push_back(GetElementInVectorFromLSB(vector, i, BYTE));
         }
-        assert(rightmost.bit_width() == vector_length_bits);
-        return rightmost;
+        auto result = Concatenate(bytes);
+        assert(result.bit_width() == vector_length_bits);
+        return result;
     }
     ExprRef ArmSme::BE_to_DRAM_ENDIAN(const ExprRef& vector, const NumericType& vector_length_bits) {
         bool both_same_endianness = (ZA_is_LE == DRAM_is_LE); // swaps if endianness differs
@@ -723,7 +724,8 @@ namespace arm {
             result = Concat(result, DRAM_GetByteNoEndian(addr+i)); // expand to higher addresses
         }
         assert(result.bit_width() == esize);
-        return convert_endianness ? DRAM_ENDIAN_to_BE(result, esize) : result; // big endian
+        return convert_endianness ? DRAM_ENDIAN_to_BE(result, esize) : result; // big endian or not
+    // TODO: honestly, better remove SwapBytes calls entirely, change concat order depending on endian at build time
     }
     // NOTE: returns updated MemState after multi-byte accumulated store (NO ENDIAN CONVERSION)
     // stores each byte one-by-one as exactly [MSB...LSB], starting with MSB at lowest address
@@ -740,16 +742,38 @@ namespace arm {
         return new_dram;
     }
     ExprRef ArmSme::DRAM_GetVectorAsZaEndian(const ExprRef& base_addr, const NumericType& element_size_bits, bool convert_endianness) {
-        NumericType elements = SVL / element_size_bits;
-        NumericType byte_esize = element_size_bits / BYTE;
-        ExprRef result = BvConst(0, SVL); // fill be completely filled after the loop
         auto addr = ZExt(base_addr, DRAM_ADDR_WIDTH); // ZExt prevent overflow
+        // if (element_size_bits == BYTE) { // TODO: fast case for BYTE still timeouts
+        //     // OPTIMIZATION (Fix B): build 16-byte vector directly in FINAL byte order;
+        //     // skip the 128-bit DRAM_ENDIAN_to_BE call entirely.  Old code produced a
+        //     // 16-deep Concat chain, then fed it through _SwapBytesInVector which did
+        //     // another 16 Extract + 15 Concat — doubled the tree.
+        //     std::vector<ExprRef> bytes;
+        //     bytes.reserve(SVL_B);
+        //     if (!convert_endianness) {
+        //         // same endian: lowest DRAM address → MSB of result  (first in Concatenate)
+        //         for (size_t i = 0; i < SVL_B; ++i)
+        //             bytes.push_back(DRAM_GetByteNoEndian(addr + BvConst(i, DRAM_ADDR_WIDTH)));
+        //     } else {
+        //         // opposite endian (byte swap): lowest DRAM address → LSB of result  (last in Concatenate)
+        //         // so iterate HIGH address → LOW address and push in that order.
+        //         for (int i = SVL_B - 1; i >= 0; --i)
+        //             bytes.push_back(DRAM_GetByteNoEndian(addr + BvConst(i, DRAM_ADDR_WIDTH)));
+        //     }
+        //     return Concatenate(bytes);
+        // }
+        // // else use generic loop
+        NumericType byte_esize = element_size_bits / BYTE;
+        NumericType elements = SVL / element_size_bits;
+        std::vector<ExprRef> elems;
+        elems.reserve(elements);
         for (size_t i = 0; i < elements; i++) {
-            auto dram_elem_za_endian = DRAM_GetElementAsZaEndian(addr, byte_esize, convert_endianness);
-            result = SetElementInVectorFromLSB(result, i, element_size_bits, dram_elem_za_endian, SVL);
+        // TODO: honestly, better remove SwapBytes calls entirely, change concat order depending on endian at build time
+            elems.push_back(DRAM_GetElementAsZaEndian(addr, byte_esize, convert_endianness));
             addr = addr + BvConst(byte_esize, DRAM_ADDR_WIDTH); // increments addr by byte_esize
         }
-        return result;
+        std::reverse(elems.begin(), elems.end()); // std::vector has no push_front, so need std::reverse
+        return Concatenate(elems);
     }
     // NOTE: takes InstrRef& to update MemState internally, along with extra WB_svl_vector, WB_base_addr
     // ZA vector arrives in Big Endian [MSB...LSB], we write starting at MSB as lowest address
@@ -758,22 +782,25 @@ namespace arm {
         assert(vector.bit_width() == SVL); // must SVL bits since WB_dram_svl only SVL bits
         NumericType elements = SVL / element_size_bits;
         NumericType byte_esize = element_size_bits / BYTE;
-        auto WB_vector = BvConst(0, SVL); // constructed from MSB side
 
         auto addr = ZExt(base_addr, DRAM_ADDR_WIDTH); // ZExt prevent overflow
         ExprRef new_dram = dram;
+        std::vector<ExprRef> wb_elems; // captures the contents of WB_vector without SetElementInVector overhead
+        wb_elems.reserve(elements);
         for (size_t i = 0; i < elements; i++) {
             auto src_elem = GetElementInVectorFromLSB(vector, i, element_size_bits); // from LSB according to ARM
             src_elem = convert_endianness ? BE_to_DRAM_ENDIAN(src_elem, element_size_bits) : src_elem;
-            WB_vector = SetElementInVectorFromMSB(WB_vector, i, element_size_bits, src_elem, SVL); // capture WB
+            wb_elems.push_back(src_elem); // builds starting from MSB towards LSB so push_back no std::reverse
             new_dram = DRAM_SetElementNoEndian(new_dram, addr, byte_esize, src_elem); // actual store
             addr = addr + BvConst(byte_esize, DRAM_ADDR_WIDTH);
         }
         instr.SetUpdate(dram, new_dram); // store to MemState
-        // capture WB address and SVL bit vector
+        auto WB_vector = Concatenate(wb_elems); // actually builds WB_vector from MSB to LSB
         instr.SetUpdate(WB_base_addr, base_addr);
-        instr.SetUpdate(WB_svl_vector, WB_vector); // the WB vector we captured, starting at MSB
+        instr.SetUpdate(WB_svl_vector, WB_vector); // captures SVL bits of the write, with MSB as lowest address
     }
+
+    // NOTE: below three helpers are used for constraints in testing
     ExprRef ArmSme::DRAM_GetByteNoEndian(size_t addr) {
     #if USE_DRAM_MEMSTATE
         return Load(dram, addr);
@@ -781,14 +808,29 @@ namespace arm {
         return DRAM_UF(BvConst(addr, DRAM_ADDR_WIDTH));
     #endif
     }
-    ExprRef ArmSme::DRAM_GetElementNoEndian(size_t addr, const NumericType& byte_esize) {
-        assert(byte_esize == 1 || byte_esize == 2 || byte_esize == 4 | byte_esize == 8 | byte_esize == 16);
+    // NOTE: accepts element_size_bits INSTEAD OF esize_bytes for clearer testing using BYTE, HALF, .. macros
+    ExprRef ArmSme::DRAM_GetElementAsZaEndian(size_t addr, const NumericType& element_size_bits, bool convert_endianness) {
+        assert(element_size_bits % BYTE == 0); // can be broken down into bytes
+        NumericType byte_esize = element_size_bits / BYTE;
         ExprRef result = DRAM_GetByteNoEndian(addr);
         for (size_t i = 1; i < byte_esize; i++) {
             result = Concat(result, DRAM_GetByteNoEndian(addr+i)); // expand to higher addresses
         }
-        return result; // BUG: no endian conversion, used by tests to constrain underlying DRAM memory
-                       // or use endian so its easier to constrain?? more natural using BE
+        assert(result.bit_width() == element_size_bits);
+        return convert_endianness ? DRAM_ENDIAN_to_BE(result, element_size_bits) : result; // big endian or not
+    }
+    ExprRef ArmSme::DRAM_GetVectorAsZaEndian(size_t base_addr, const NumericType& element_size_bits, const NumericType& vector_length_bits, bool convert_endianness) {
+        assert(vector_length_bits % BYTE == 0 && element_size_bits % BYTE == 0); // can be broken down into bytes
+        NumericType elements = vector_length_bits / element_size_bits;
+        NumericType byte_esize = element_size_bits / BYTE;
+        ExprRef result = BvConst(0, SVL); // fill be completely filled after the loop
+        size_t addr = base_addr;
+        for (size_t i = 0; i < elements; i++) {
+            auto dram_elem_za_endian = DRAM_GetElementAsZaEndian(addr, element_size_bits, convert_endianness);
+            result = SetElementInVectorFromLSB(result, i, element_size_bits, dram_elem_za_endian, SVL);
+            addr = addr + byte_esize; // increments addr by byte_esize
+        }
+        return result;
     }
     
     std::vector<size_t> ArmSme::GetSliceAddresses(int tile_idx, int slice_idx, bool is_vertical, const NumericType& element_size_bits) {
@@ -833,13 +875,13 @@ namespace arm {
     }
     
     ExprRef ArmSme::Get32BitGPR(size_t w_idx) {
-        assert(w_idx < GPR_COUNT);
+        assert(w_idx <= GPR_COUNT); // allows idx=31
         if (w_idx == 31) { return WZR; }
         else { return Extract(GPRs[w_idx], 31, 0); }
     }
 
     ExprRef ArmSme::Get64BitGPR(size_t x_idx, bool use_sp) {
-        assert(x_idx < GPR_COUNT);
+        assert(x_idx <= GPR_COUNT); // allows idx=31
         if (x_idx == 31) { return use_sp ? SP : XZR; }
         else { return GPRs[x_idx]; }
     }

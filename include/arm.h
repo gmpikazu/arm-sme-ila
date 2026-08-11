@@ -49,6 +49,7 @@ using namespace ilang;
 
 class ArmSme {
     Ila m;
+    // baked into the AST during compile time, NOT runtime
     bool ZA_is_LE; // current implementation fixes this to FALSE (since ZA is Big Endian)
     bool DRAM_is_LE; // NOTE: ZA is Big Endian internally, for now just care about DRAM endianness
     
@@ -314,7 +315,8 @@ class ArmSme {
     ExprRef Get64BitGPR(size_t x_idx, bool use_sp=false); // for X register access
     
     ExprRef DRAM_GetByteNoEndian(size_t addr);
-    ExprRef DRAM_GetElementNoEndian(size_t addr, const NumericType& byte_esize);
+    ExprRef DRAM_GetElementAsZaEndian(size_t addr, const NumericType& element_size_bits, bool convert_endianness);
+    ExprRef DRAM_GetVectorAsZaEndian(size_t base_addr, const NumericType& element_size_bits, const NumericType& vector_length_bits, bool convert_endianness);
 };
 
 }  // namespace arm
