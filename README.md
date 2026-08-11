@@ -1,16 +1,15 @@
 # Project Plan
 ## TODO
-> dram tests, LDR/STR, memstate for DRAM
-- what is difference between `s.add(u.GetZ3Expr() == cstr)` and `u.AddStepPred() + u.Unroll`?
+> STR test, SVE2 test
+- what is difference between `s.add(u.GetZ3Expr() == cstr)` and `u.AddStepPred() + u.Unroll`? and `s.Add(u.Equal(..))`
 - why want use UFs for DRAM? we cant constrain future loads to load what we stored if use WB_svl_vec
 
 ## IMPORTANT
 - report about how I handled faults **Faults do not stop the execution of state change**
 - gave up on Store to non MemState, what is better solution? (do we really not want MemStates? why?)
-    - i cant return hashmap since instructions only updates STATES, and i dont know how many different addresses, values, etc the instruction is going to write
 - floating point UFs is terrible to test (tedious to constrain each input/output)
 - double chain svl instructions worked
-- endianness problems (my ZA is BE, but DRAM LE, does it matter? changing this means tests all break)
+- endianness problems (my ZA is BE, but DRAM flexible, does it matter? changing this means tests all break)
 - the tests now are a bit hardcoded assuming SVL=128, else it breaks
 
 #### My UFs DRAM Idea:
@@ -18,36 +17,13 @@
 2. `Read` either reads from DRAM `MemState` or UFs controlled by a boolean
 - maintain (1) SVL-bit write vector, (2) esize_bits, (3) base+offset that starts the write
 - then in testing, use Z3 to constrain step[i+1] UFs to produce results based on prev write **and** carry over the last couple writes that didnt get overwritten
-- is this enough for what we want to do? it seems more limited than `MemState`
-
-## Bit Width Truncation ERRORS
-- technically can change to `base_addr` compute first, then each iteration add `offset*byte_esize` but what if bit widths are not enough `offset*byte_esize` and we get errors, this may happen to other instuctions that are not modelled with the EXACT ORDER OF OPERATION according to ARM
-- in our case here `offset` is only 64 bits, so `offset*byte_esize` would probably overflow?
-<!-- BUG: all function taking inputs must interally perform extension to prevent truncation -->
-```cpp
-for (size_t i = 0; i < dim; i++) {
-    auto addr = ZExt(base, DRAM_ADDR_WIDTH) + ZExt(offset, DRAM_ADDR_WIDTH) * BvConst(byte_esize, DRAM_ADDR_WIDTH);
-    ExprRef src_elem = GetElementInVectorFromLSB(source, i, esize);
-    ExprRef old_dram_elem = DRAM_Read(addr, byte_esize); // using UF must use byte_esize
-    // NOTE: LE->BE
-    old_dram_elem = SwapBytes(old_dram_elem, esize, GLOBAL_DO_SWAP);
-    auto active = (GetPredBitFromLSB(mask, i, esize) != 0);
-    ExprRef new_write_elem = Ite(active, src_elem, old_dram_elem);
-    source = SetElementInVectorFromLSB(source, i, esize, new_write_elem, SVL);
-    offset = offset + 1;
-}
-```
+> This is NOT POSSIBLE, since we need to constrain everything BEFORE running `s.check()` but `u.GetZ3Expr` needs solver to already be done (JUST USE MEMSTATE??)
 
 ## Crucial Clarification (in meeting)
 - how to model exception throw of `SPAlignmentCheck`, do we need to search for how ARM handles exceptions and save state, exception handler? Or just assume the best case scenario that we always have aligned SP using assertions (SP % 16 == 0 precondition), or update a custom made bool flag for `stack_misaligned`
     > how to conditionally run an SP alignment check when `Rn` field is passed in as 31??
 > how to constrain UFs, like negating is only flipping first bit of float, or product/sum, without being tedious?
 - loading/storing BYTE,..,QUAD has no alignment check? meaning we can read across cache lines?
-- typed load/store first before `LDR`, `STR`
-
-> Does ZA behave in little endian (rightmost is LSB) when interpreting elements on tile slices?
-- When modelling DRAM load/stores, we need to care about endianness (higher bits are placed near MSB)
-> Arithmetic Instruction with Predicate Masking are non-efficient, solver can't finish 
 
 ## Remaining Tasks
 - Unit tests for SVE2 instructions
@@ -56,7 +32,6 @@ for (size_t i = 0; i < dim; i++) {
 - Optimize `K2` FP instructions using `delta` then `sum` pattern <!-- TODO: optimizations require checking the true ARM pseuducode to see whether we can split the logic into `delta` and `sum` -->
 - Check each instruction and their inputs for proper `SExt` or `ZExt`
 - Check `ExprRef` arithmetic, make sure they are extended before operation **to prevent truncation**
-- Model load store DRAM (using UFs): `LDR`, `ST1`, `STR` not yet
 - Test edge cases of `XZR`, `WZR` access and write
 - Verify instructions by constructing unit tests, then integration tests (eg., {ZERO, MOVA, SMOPA})
 ## Differences From ARM SME Document
@@ -103,28 +78,27 @@ This document is aimed to provide viewers with an overview of the implementation
 
 ## Temporary Quirks
 - `BaseRegPlusImm` extends to `TEMP_LARGEST_ADDR_WIDTH` then the Tile Helpers perform modulo (other helpers perform modulo before calling other functions)
-- The modelled ZA is Big Endian but `LD1` instructions read in Little Endian and place data as Big Endian into ZA (it grab `mbytes` bytes starting at `addr` from low to higher address, placing them from LSB to MSB of the ZA vector)
-```
-// LD1 pseudocode
-for e = 0 to dim - 1
-    addr = base + UInt(offset) * mbytes; 
-    if ElemP[mask, e, esize] == '1' then
-        Elem[result, e, esize] = Mem[addr, mbytes, AccType_SME]; // converts Endianness
-    else 
-        Elem[result, e, esize] = Zeros(); 
-    offset = offset + 1;
-```
-- `Mem[mbytes]` pseudocode of ARM should account for endianness
-- `MemSingle[addr]` of ARM should just grab a single byte, disregarding endianness
-<!-- BUG: Mem[] actually checks endianness, while LDR's MemSingle does not -->
-<!-- BUG: SetElementAtAddress stores MSB first so its Big Endian but we read DRAM as LE, be consistent -->
+- Modulo (constraining the input) is sometimes the responsibility of the caller and other times the callee
 
 ## DRAM Implementation
-- `DRAM_Read` exists as the model's private helper and public interface for testing ease
-- `DRAM_Write` can be implemented as Store to `MemState` or buffered into `HashMap<addr, val>`
-- Reading and writing is done from lower address to higher address (assumed to be in Little Endian for now)
-- `Read` handles endianness and converts into Big Endian for ZA, `Write` converts ZA's Big Endian to DRAM endianness
-- `GetByte` **does not** care about endianness and is used by `LDR` and `STR` instructions
+- The current DRAM implementation involves both a `MemState` and Uninterpreted Function called `DRAM_UF`
+    - `USE_DRAM_MEMSTATE` global flag controls whether bytes are read from `DRAM_UF` or `MemState`
+    - Whether `DRAM_UF` or `MemState` is used does not break `cstr_step` helpers for read constraints during testing
+    - However, setting `USE_DRAM_MEMSTATE=false` means all DRAM reads are unaffected by DRAM writes (`MemState` store)
+- `DRAM_is_LE` flag is set in `arm::ArmSme`'s constructor and changes DRAM's endianness for the model at compile time
+- `DRAM_Read`-related functions exists as the model's internal helper and also as a public interface for testing ease
+    - The public version takes in `element_size_bits` instead of `esize_bytes` to accept `BYTE`, `HALF`, .. macros
+    - `Read` optionally converts the data from DRAM endianness to ZA endianness
+    - `GetByte` **does not** care about endianness
+- `DRAM_Write`-related functions are currently implemented as an atomic store of `SVL` bits since it also updates an entire SVL-bit-wide `wb_svl_vector` to capture what was written to DRAM on that step
+    - `Write` optionally converts the data from ZA endianness to DRAM endianness
+    - `wb_svl_vector` is read from MSB to LSB, starting from base address and going up to higher addresses
+    - It also updates `wb_base_addr` which stores the DRAM `base_addr` of the SVL-bit write
+
+## GPRs (X registers & W registers)
+- There are 31 GPRs in Base A64, X registers are 64-bit, W registers are 32-bit lower half of X registers
+- `GPRs` array can be indexed up to `idx=30`, but ARM defines `idx=31` to be among `XZR`, `WZR`, `SP` (stack pointer)
+- `Get(64|32)BitGPR` helpers return the corresponding zero register (`XZR`, `WZR`) or stack `SP` depending on a `bool`
 
 ## ZA Storage
 **Representation:**
