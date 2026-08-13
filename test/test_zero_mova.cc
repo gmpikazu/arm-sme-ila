@@ -10,7 +10,8 @@ void test_cstr_helper(ArmSme& sme) {
             Tracker t;
             // each new layer is applied on top of previously applied layer
             track_slice(t, bv_val_128(ctx, 0x0001020304050607ULL, 0x08090A0B0C0D0E0F), 0, 0, false, BYTE);
-            track_slice(t, bv_val_128(ctx, 0xAAAABBBBCCCCDDDDULL, 0x1111222244445555), 0, 2, true, BYTE); track_slice(t, bv_val_128(ctx, 0x0001020304050607ULL, 0x08090A0B0C0D0E0F), 7, 0, false, BYTE);
+            track_slice(t, bv_val_128(ctx, 0xAAAABBBBCCCCDDDDULL, 0x1111222244445555), 0, 2, true, BYTE); 
+            track_slice(t, bv_val_128(ctx, 0x0001020304050607ULL, 0x08090A0B0C0D0E0F), 7, 0, false, BYTE);
             cstr_all_tracked_and_zero(s, u, ctx, t, sme);
         },
         [&](z3::model &mdl, IlaZ3Unroller &u) {

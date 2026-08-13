@@ -1,15 +1,10 @@
 # Project Plan
 ## TODO
-> STR test, SVE2 test
-- what is difference between `s.add(u.GetZ3Expr() == cstr)` and `u.AddStepPred() + u.Unroll`? and `s.Add(u.Equal(..))`
-- why want use UFs for DRAM? we cant constrain future loads to load what we stored if use WB_svl_vec
+> STR test, SVE2 test, FP structural test (please don't timeout)
+- what is difference between `s.add(u.GetZ3Expr() == cstr)` and `u.AddStepPred() + u.Unroll`? and `s.Add(u.Equal(..))` constrain future `Load` using previous `Store` concretely first, before moving on to associative list in the unroller
 
 ## IMPORTANT
-- report about how I handled faults **Faults do not stop the execution of state change**
-- gave up on Store to non MemState, what is better solution? (do we really not want MemStates? why?)
 - floating point UFs is terrible to test (tedious to constrain each input/output)
-- double chain svl instructions worked
-- endianness problems (my ZA is BE, but DRAM flexible, does it matter? changing this means tests all break)
 - the tests now are a bit hardcoded assuming SVL=128, else it breaks
 
 #### My UFs DRAM Idea:
@@ -20,9 +15,6 @@
 > This is NOT POSSIBLE, since we need to constrain everything BEFORE running `s.check()` but `u.GetZ3Expr` needs solver to already be done (JUST USE MEMSTATE??)
 
 ## Crucial Clarification (in meeting)
-- how to model exception throw of `SPAlignmentCheck`, do we need to search for how ARM handles exceptions and save state, exception handler? Or just assume the best case scenario that we always have aligned SP using assertions (SP % 16 == 0 precondition), or update a custom made bool flag for `stack_misaligned`
-    > how to conditionally run an SP alignment check when `Rn` field is passed in as 31??
-> how to constrain UFs, like negating is only flipping first bit of float, or product/sum, without being tedious?
 - loading/storing BYTE,..,QUAD has no alignment check? meaning we can read across cache lines?
 
 ## Remaining Tasks
@@ -141,8 +133,20 @@ This document is aimed to provide viewers with an overview of the implementation
 - The `CHECK()` function inspects the `faults` state at every step and fails if `faults > 0`
 
 ## Preventing Z3 Garbage Initialization
-- Explicitly constrain all values to prevent Z3 populating them with garbage
-- For ZA, this was done through `cstr_step_slice()` where all untouched addresses are explicitly set to `0x00` to clean up `PrintZa()`'s output for easier empirical verification
+- Explicitly constrain all values (including those we do not care about) to prevent Z3 populating them with garbage
+- For ZA, this was **initially** done through `cstr_step_slice()` where all untouched addresses are explicitly set to `0x00` to clean up `PrintZa()`'s output for easier empirical verification (this helper **only supports** constraining **a single slice** due to immediately zeroing out everything else, use **new idiom below** for multiple constraints)
+- Later, the `track_slice()` and `cstr_all_tracked_and_zero()` idiom was introduced to track multiple slices with newer ones overwriting previous ones, then finally zeroing out remaining addresses that was not constrained
+    - `track_slice()` updates an `std::unordered_map<size_t, z3::expr>` to associate an address with the corresponding `ilang::ExprRef` that represents the constrained byte
+    - after accumulating many `track_slice()` (with future constraints overwriting the past ones), `cstr_all_tracked_and_zero()` enforces the constraints defined in the `std::unordered_map` and zeroes out other untouched addresses
+    - **Example Usage For Generating Multiple Slice Constraints:**
+    ```cpp
+    Tracker t; // std::unordered_map<size_t, z3::expr>
+    // each new layer is applied on top of previously applied layer
+    track_slice(t, bv_val_128(ctx, 0x0001020304050607ULL, 0x08090A0B0C0D0E0F), 0, 0, false, BYTE);
+    track_slice(t, bv_val_128(ctx, 0xAAAABBBBCCCCDDDDULL, 0x1111222244445555), 0, 2, true, BYTE); 
+    track_slice(t, bv_val_128(ctx, 0x0001020304050607ULL, 0x08090A0B0C0D0E0F), 7, 0, false, BYTE);
+    cstr_all_tracked_and_zero(s, u, ctx, t, sme); // enforces the constraint and zeroes the rest
+    ```
 
 ## Optimizing Load Store Operations on ZA
 - Functions like `CombineTileWith*Vector()` follow the pattern:
