@@ -20,3 +20,5 @@ extern void test_store(arm::ArmSme& sme_DramLE, arm::ArmSme& sme_DramBE);
 
 // SVE2 instructions
 extern void test_psel(arm::ArmSme& sme);
+extern void test_revd(arm::ArmSme& sme);
+extern void test_clamp(arm::ArmSme& sme);

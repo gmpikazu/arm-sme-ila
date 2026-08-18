@@ -55,11 +55,15 @@ int main() {
     // test_addha_addva(sme_DramLE);
     // test_integer_outer_prod(sme_DramLE);
     // test_spl_svl(sme_DramLE);
+    // test_load(sme_DramLE, sme_DramBE);
+    // test_store(sme_DramLE, sme_DramBE);
+    // test_psel(sme_DramLE);
 
     // NOTE: under development
-    // test_float_outer_prod(sme_DramLE);
-    // test_load(sme_DramLE, sme_DramBE);
-    test_store(sme_DramLE, sme_DramBE);
+    // test_float_outer_prod(sme_DramLE); // TODO:
+    // test_uf_dram(sme_DramLE, sme_DramBE);
+    test_revd(sme_DramLE); // TODO: test with bigger SVL
+    test_clamp(sme_DramLE);
     
     // summary
     print_test_summary();

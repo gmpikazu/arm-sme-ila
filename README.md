@@ -126,6 +126,11 @@ This document is aimed to provide viewers with an overview of the implementation
 - Observation: if we manually constrain `pstate_sm` or `pstate_za` to false before our SME instruction is supposed to execute, Z3 **cannot auto-generate** conditions to make `SME_ON=true` so, returns `unsat` because instruction can't decode
 - Created a Ctest-inspired `CHECK()` function that performs the necessary setup using a `std::function` argument, then unrolls, and verifies using another `std::function` argument
 
+## Z3 Insights
+- Internal States can only change between steps if explicitly set in `instr.Update`
+- Input States **always** changes between steps
+- Solving (`s.check()`) is Z3's processs of filling the symbolic values with concrete ones to satisfy all `instr.Update` transition constraints and external constraints added by `cstr_step` helpers
+
 ## Fault Checking
 - Faults are modeled with an additional `faults` state attached to the model that is incremented on each fault
 - For `LDR`, `STR` instructions, misalignment is **always** treated as fault (though ARM says it's optional)

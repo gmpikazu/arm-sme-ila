@@ -339,6 +339,7 @@ namespace arm {
             auto result = GetVectorRegister(Zd); // will be modified below
 
             assert(elements > 0); // SVL greater than esize
+            assert(esize == swsize * 2); // swsize exactly half, since 0,1 index is used
             for (size_t i = 0; i < elements; i++) {
                 auto src_elem = GetElementInVectorFromLSB(operand, i, esize);
                 auto high_half = GetElementInVectorFromLSB(src_elem, 1, swsize);
