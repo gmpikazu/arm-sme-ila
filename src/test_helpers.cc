@@ -73,7 +73,7 @@ z3::expr bv_val(z3::context &ctx, std::vector<uint64_t> values) {
 ilang::ExprRef GetByteAtRowCol(ArmSme& sme, int row, int col) {
     // ZA linear memory layout: row-major, each row = SVL_B bytes
     // address = row * SVL_B + col
-    return Load(sme.za, BvConst(row * SVL_B + col, sme.za.addr_width()));
+    return Load(sme.za, BvConst(row * sme.SVL_B + col, sme.za.addr_width()));
 }
 
 #define MAX_BYTES_PER_LINE 16
@@ -117,9 +117,9 @@ void PrintDRAM(z3::model &mdl, ilang::IlaZ3Unroller &u, ArmSme& sme, int start_a
 // Print ZA in a formatted ASCII table
 void PrintZa(z3::model &mdl, ilang::IlaZ3Unroller &u, ArmSme& sme, int step) {
     const int cell_width = 3; // includes '\0'
-    
+
     std::cout << "┌";
-    for (size_t col = 0; col < SVL_B; col++) {
+    for (size_t col = 0; col < sme.SVL_B; col++) {
         std::cout << std::string(cell_width, '-');
     }
     std::cout << "─┐" << std::endl;
@@ -128,55 +128,55 @@ void PrintZa(z3::model &mdl, ilang::IlaZ3Unroller &u, ArmSme& sme, int step) {
     std::cout << "│ ZA TILE MEMORY LAYOUT (16x16) - Step " << step << " ";
     std::cout << std::string(spaces, ' ') << "│" << std::endl;
     std::cout << "├";
-    for (size_t col = 0; col < SVL_B; col++) {
+    for (size_t col = 0; col < sme.SVL_B; col++) {
         std::cout << std::string(cell_width, '-');
     }
     std::cout << "─┤" << std::endl;
-    
+
     // Print column headers
     std::cout << "│";
-    for (ssize_t col = SVL_B-1; col >= 0; col--) {
+    for (ssize_t col = sme.SVL_B-1; col >= 0; col--) {
         std::cout << std::setw(cell_width) << std::right << col;
     }
     std::cout << " │" << std::endl;
     std::cout << "├";
-    for (size_t col = 0; col < SVL_B; col++) {
+    for (size_t col = 0; col < sme.SVL_B; col++) {
         std::cout << std::string(cell_width, '-');
     }
     std::cout << "─┤" << std::endl;
-    
+
     // Print each row
-    for (size_t row = 0; row < SVL_B; row++) {
+    for (size_t row = 0; row < sme.SVL_B; row++) {
         std::cout << "│ ";
-        for (size_t col = 0; col < SVL_B; col++) {
-            size_t addr = row * SVL_B + col;
+        for (size_t col = 0; col < sme.SVL_B; col++) {
+            size_t addr = row * sme.SVL_B + col;
             auto byte_expr = Load(sme.za, BvConst(addr, sme.za.addr_width()));
             auto byte_val = mdl.eval(u.GetZ3Expr(byte_expr, step)).to_string();
-            
+
             // Remove #x prefix if present
             if (byte_val.size() > 2 && byte_val.substr(0, 2) == "#x") {
                 byte_val = byte_val.substr(2);
             }
-            
+
             // NOTE: make 00 into __
             if (byte_val == "00") { byte_val = "__"; }
-            
+
             // without prefix
             std::cout << std::setw(2) << std::setfill('0') << std::uppercase << byte_val << " ";
             std::cout << std::setfill(' ');
         }
         std::cout << "│ R" << std::setw(2) << std::left << row << " " << std::endl;;
     }
-    
+
     std::cout << "└";
-    for (size_t col = 0; col < SVL_B; col++) {
+    for (size_t col = 0; col < sme.SVL_B; col++) {
         std::cout << std::string(cell_width, '-');
     }
     std::cout << "─┘" << std::endl;
 }
 
 void InitZaToZero(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, ArmSme& sme, int step) {
-    for (size_t addr = 0; addr < ZA_BYTE_SIZE; addr++) {
+    for (size_t addr = 0; addr < sme.ZA_BYTE_SIZE; addr++) {
         auto byte_expr = Load(sme.za, BvConst(addr, sme.za.addr_width()));
         cstr_step_bv(s, u, ctx, byte_expr, 0x00, BYTE, step);
     }
@@ -190,7 +190,7 @@ void cstr_step_slice(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, A
     // get all addresses touched by this slice
     auto touched_addrs = sme.GetSliceAddresses(tile_idx, slice_idx, is_vertical, element_size_bits);
     // zero all bytes NOT touched by the slice
-    for (size_t addr = 0; addr < ZA_BYTE_SIZE; addr++) {
+    for (size_t addr = 0; addr < sme.ZA_BYTE_SIZE; addr++) {
         bool is_touched = false;
         for (size_t touched_addr : touched_addrs) {
             if (addr == touched_addr) {
@@ -213,13 +213,13 @@ void cstr_step_slice(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, A
     }
 }
 
-void track_slice(Tracker& tracker, const z3::expr& value_expr, int tile_idx, int slice_idx, bool is_vertical, const ilang::NumericType& element_size_bits) {
-    NumericType dim = SVL / element_size_bits;
-    NumericType num_tiles = SVL_B / dim;
+void track_slice(Tracker& tracker, const z3::expr& value_expr, int tile_idx, int slice_idx, bool is_vertical, const ilang::NumericType& element_size_bits, ArmSme& sme) {
+    NumericType dim = sme.SVL / element_size_bits;
+    NumericType num_tiles = sme.SVL_B / dim;
     int element_size_bytes = element_size_bits / BYTE;
-    
-    assert(value_expr.get_sort().bv_size() == SVL);
-    assert(SVL == Z_REG_WIDTH);
+
+    assert(value_expr.get_sort().bv_size() == sme.SVL);
+    assert(sme.SVL == sme.Z_REG_WIDTH);
     auto GetVecByteLSB = [&](size_t idx) -> z3::expr {
         // get element of vector from LSB
         size_t rightmost = BYTE * idx;
@@ -228,19 +228,19 @@ void track_slice(Tracker& tracker, const z3::expr& value_expr, int tile_idx, int
     };
     auto GetVecByteMSB = [&](size_t idx) -> z3::expr {
         // get element of vector from MSB
-        size_t mirrored_idx = SVL_B - 1 - idx;
+        size_t mirrored_idx = sme.SVL_B - 1 - idx;
         return GetVecByteLSB(mirrored_idx);
     };
-    
+
     if (is_vertical) {
         // ARM SME: col_idx % dim (required by ARM)
         int wrapped_col_idx = (dim == 1) ? 0 : (slice_idx & (dim - 1)); // & (dim-1) fast modulo
-        int col = (SVL_B - element_size_bytes) - (wrapped_col_idx * element_size_bytes);
-        
+        int col = (sme.SVL_B - element_size_bytes) - (wrapped_col_idx * element_size_bytes);
+
         // bottom up direction for ARM SME vertical slice concatenation behavior
         for (int i = 0; i < dim; i++) {
             size_t row = tile_idx + i * num_tiles;
-            size_t base_addr = row * SVL_B + col;
+            size_t base_addr = row * sme.SVL_B + col;
             for (int b = 0; b < element_size_bytes; b++) {
                 tracker.insert_or_assign(base_addr + b, GetVecByteMSB((dim-1-i) * element_size_bytes + b));
             }
@@ -249,15 +249,15 @@ void track_slice(Tracker& tracker, const z3::expr& value_expr, int tile_idx, int
         // ARM SME: row_idx % dim (required by ARM)
         int wrapped_row_idx = (dim == 1) ? 0 : (slice_idx & (dim - 1)); // & (dim-1) fast modulo
         size_t row = tile_idx + wrapped_row_idx * num_tiles;
-        
-        for (size_t col = 0; col < SVL_B; col++) {
-            tracker.insert_or_assign(row * SVL_B + col, GetVecByteMSB(col));
+
+        for (size_t col = 0; col < sme.SVL_B; col++) {
+            tracker.insert_or_assign(row * sme.SVL_B + col, GetVecByteMSB(col));
         }
     }
 }
 
 void cstr_all_tracked_and_zero(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const Tracker& tracker, ArmSme& sme, int step) {
-    for (size_t addr = 0; addr < ZA_BYTE_SIZE; addr++) {
+    for (size_t addr = 0; addr < sme.ZA_BYTE_SIZE; addr++) {
         auto byte_expr = Load(sme.za, BvConst(addr, sme.za.addr_width()));
         auto it = tracker.find(addr);
         if (it != tracker.end()) {

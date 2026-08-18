@@ -36,8 +36,8 @@ int main() {
     fLI::FLAGS_minloglevel = 2; // NOTE: remove noisy ILAng logs
 
     // NOTE: only DRAM tests require both, others don't matter
-    ArmSme sme_DramLE(true); // DRAM is Little Endian
-    ArmSme sme_DramBE(false); // DRAM is Big Endian
+    ArmSme sme_DramLE(true, 128); // DRAM is Little Endian
+    ArmSme sme_DramBE(false, 128); // DRAM is Big Endian
     
     // list everything
     list_states(sme_DramLE);
@@ -47,17 +47,17 @@ int main() {
     // test_quick(sme_DramLE);
 
     // NOTE: tested and working
-    // test_pstate(sme_DramLE);
-    // test_cstr_helper(sme_DramLE);
-    // test_slice_helper(sme_DramLE);
-    // test_zero(sme_DramLE);
-    // test_mova(sme_DramLE);
-    // test_addha_addva(sme_DramLE);
-    // test_integer_outer_prod(sme_DramLE);
-    // test_spl_svl(sme_DramLE);
-    // test_load(sme_DramLE, sme_DramBE);
-    // test_store(sme_DramLE, sme_DramBE);
-    // test_psel(sme_DramLE);
+    test_pstate(sme_DramLE);
+    test_cstr_helper(sme_DramLE);
+    test_slice_helper(sme_DramLE);
+    test_zero(sme_DramLE);
+    test_mova(sme_DramLE);
+    test_addha_addva(sme_DramLE);
+    test_integer_outer_prod(sme_DramLE);
+    test_spl_svl(sme_DramLE);
+    test_load(sme_DramLE, sme_DramBE);
+    test_store(sme_DramLE, sme_DramBE);
+    test_psel(sme_DramLE);
 
     // NOTE: under development
     // test_float_outer_prod(sme_DramLE); // TODO:

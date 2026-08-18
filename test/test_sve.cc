@@ -9,9 +9,9 @@ void test_revd(ArmSme& sme) {
     CHECK("asdkflasdfj", sme, {"REVD.Q"},
         [&](IlaZ3Unroller& u, z3::solver& s, z3::context& ctx) {
             cstr_step_bv(s, u, ctx, sme.Zd, 3ULL, sme.Zd.bit_width()); // Zd = 3
-            cstr_step(s, u, ctx, sme.z_regs[3], ctx.bv_val(-1, Z_REG_WIDTH)); // repeated F initially
+            cstr_step(s, u, ctx, sme.z_regs[3], ctx.bv_val(-1, sme.Z_REG_WIDTH)); // repeated F initially
             cstr_step_bv(s, u, ctx, sme.Pg, 5ULL, sme.Pg.bit_width());
-            cstr_step(s, u, ctx, sme.p_regs[5], ctx.bv_val(-1, P_REG_WIDTH)); // all ones
+            cstr_step(s, u, ctx, sme.p_regs[5], ctx.bv_val(-1, sme.P_REG_WIDTH)); // all ones
             cstr_step_bv(s, u, ctx, sme.Zn, 7ULL, sme.Zn.bit_width());
             cstr_step(s, u, ctx, sme.z_regs[7], bv_val_128(ctx, 0x0011223344556677, 0x8899AABBCCDDEEFF));
         },
@@ -48,7 +48,7 @@ void test_clamp(ArmSme& sme) {
             // contains vector [-8, -7, ..., -1, 1, 2, ..., 8] of 16 BYTE elements
             cstr_step(s, u, ctx, sme.z_regs[7], bv_val_128(ctx, 0xF8F9FAFBFCFDFEFF, 0x0102030405060708));
             cstr_step_bv(s, u, ctx, sme.Zn, 1ULL, sme.Zn.bit_width()); // min
-            cstr_step(s, u, ctx, sme.z_regs[1], ctx.bv_val(0, Z_REG_WIDTH));
+            cstr_step(s, u, ctx, sme.z_regs[1], ctx.bv_val(0, sme.Z_REG_WIDTH));
             cstr_step_bv(s, u, ctx, sme.Zm, 2ULL, sme.Zm.bit_width()); // max
             cstr_step(s, u, ctx, sme.z_regs[2], bv_val_128(ctx, 0x7F7F7F7F7F7F7F7F, 0x7F7F7F7F7F7F7F00));
         },
@@ -66,11 +66,11 @@ void test_psel(ArmSme& sme) {
         [&](IlaZ3Unroller& u, z3::solver& s, z3::context& ctx) {
             // step 0
             cstr_step_bv(s, u, ctx, sme.Pd, 7ULL, sme.Pd.bit_width()); // dest = P[7]
-            cstr_step_bv(s, u, ctx, sme.p_regs[7], 0x6767, P_REG_WIDTH); // init ugly number
+            cstr_step_bv(s, u, ctx, sme.p_regs[7], 0x6767, sme.P_REG_WIDTH); // init ugly number
             cstr_step_bv(s, u, ctx, sme.Pn, 1ULL, sme.Pn.bit_width()); // op1 = P[1]
-            cstr_step(s, u, ctx, sme.p_regs[1], ctx.bv_val(-1, P_REG_WIDTH)); // F pattern
+            cstr_step(s, u, ctx, sme.p_regs[1], ctx.bv_val(-1, sme.P_REG_WIDTH)); // F pattern
             cstr_step_bv(s, u, ctx, sme.Pm, 2ULL, sme.Pm.bit_width()); // op2 = P[2]
-            cstr_step_bv(s, u, ctx, sme.p_regs[2], 0x0306, P_REG_WIDTH); // only some are ones
+            cstr_step_bv(s, u, ctx, sme.p_regs[2], 0x0306, sme.P_REG_WIDTH); // only some are ones
             // index into predicate
             cstr_step_bv(s, u, ctx, sme.Rv, 13ULL, sme.Rv.bit_width()); // index = W[13]
             cstr_step_bv(s, u, ctx, sme.Get32BitGPR(13), 0ULL, 32); // W[13] = 0

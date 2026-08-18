@@ -2,10 +2,26 @@
 #include "config.h"
 
 namespace arm {
-    ArmSme::ArmSme(bool DRAM_is_LE) :
+    ArmSme::ArmSme(bool DRAM_is_LE, NumericType SVL) :
         m(Ila("arm")),
         ZA_is_LE(false), // fixed
         DRAM_is_LE(DRAM_is_LE),
+
+        // dimension metrics
+        SVL(SVL),
+        SVL_B(SVL / BYTE),
+        LOG2_SVL_B(std::log2(SVL_B)),
+        GPR_COUNT(31),
+        GPR_ADDR_WIDTH(std::ceil(std::log2(GPR_COUNT))),
+        ZA_BYTE_SIZE(SVL_B * SVL_B),
+        ZA_ADDR_WIDTH(std::log2(ZA_BYTE_SIZE)),
+        Z_REG_COUNT(32),
+        Z_ADDR_WIDTH(std::log2(Z_REG_COUNT)),
+        Z_REG_WIDTH(SVL),
+        P_REG_COUNT(8),
+        P_ADDR_WIDTH(std::log2(P_REG_COUNT)),
+        P_REG_WIDTH(SVL_B),
+        DRAM_ADDR_WIDTH(128),
 
         // TODO: these need more thought
         // Tszh(m.NewBvInput("Tszh",)1);

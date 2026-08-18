@@ -9,9 +9,9 @@ void test_cstr_helper(ArmSme& sme) {
         [&](IlaZ3Unroller &u, z3::solver &s, z3::context &ctx) {
             Tracker t;
             // each new layer is applied on top of previously applied layer
-            track_slice(t, bv_val_128(ctx, 0x0001020304050607ULL, 0x08090A0B0C0D0E0F), 0, 0, false, BYTE);
-            track_slice(t, bv_val_128(ctx, 0xAAAABBBBCCCCDDDDULL, 0x1111222244445555), 0, 2, true, BYTE); 
-            track_slice(t, bv_val_128(ctx, 0x0001020304050607ULL, 0x08090A0B0C0D0E0F), 7, 0, false, BYTE);
+            track_slice(t, bv_val_128(ctx, 0x0001020304050607ULL, 0x08090A0B0C0D0E0F), 0, 0, false, BYTE, sme);
+            track_slice(t, bv_val_128(ctx, 0xAAAABBBBCCCCDDDDULL, 0x1111222244445555), 0, 2, true, BYTE, sme);
+            track_slice(t, bv_val_128(ctx, 0x0001020304050607ULL, 0x08090A0B0C0D0E0F), 7, 0, false, BYTE, sme);
             cstr_all_tracked_and_zero(s, u, ctx, t, sme);
         },
         [&](z3::model &mdl, IlaZ3Unroller &u) {
@@ -25,7 +25,7 @@ void test_cstr_helper(ArmSme& sme) {
     CHECK("SHOWCASE: Multi-byte Vertical Track Slice", sme, {"ZERO"},
         [&](IlaZ3Unroller &u, z3::solver &s, z3::context &ctx) {
             Tracker t;
-            track_slice(t, bv_val_128(ctx, 0xAAAABBBBCCCCDDDDULL, 0x1111222244445555), 0, 2, true, WORD);
+            track_slice(t, bv_val_128(ctx, 0xAAAABBBBCCCCDDDDULL, 0x1111222244445555), 0, 2, true, WORD, sme);
             cstr_all_tracked_and_zero(s, u, ctx, t, sme);
         },
         [&](z3::model &mdl, IlaZ3Unroller &u) {
@@ -77,7 +77,7 @@ void test_slice_helper(ArmSme& sme) {
         [&](z3::model &mdl, IlaZ3Unroller &u) {
             std::cout << " row 1 will be populated at step 0\n";
             PrintZa(mdl, u, sme, 0);
-            for (size_t col = 0; col < SVL_B; col++) {
+            for (size_t col = 0; col < sme.SVL_B; col++) {
                 // match the bytes of row 1 with the ones we assigned
                 std::string byte_val = mdl.eval(u.GetZ3Expr(GetByteAtRowCol(sme, 1, col), 0)).to_string();
                 uint8_t expected_byte = 0x0F - col; // Big-endian: col 0 = MSB
@@ -87,7 +87,7 @@ void test_slice_helper(ArmSme& sme) {
             }
             std::cout << " row 1 will be zeroed out at step 1\n";
             PrintZa(mdl, u, sme, 1);
-            for (size_t col = 0; col < SVL_B; col++) {
+            for (size_t col = 0; col < sme.SVL_B; col++) {
                 std::string byte_val = mdl.eval(u.GetZ3Expr(GetByteAtRowCol(sme, 1, col), 1)).to_string();
                 EXPECT_TRUE(byte_val == "#x00");
             }
@@ -136,8 +136,8 @@ void test_mova(ArmSme& sme) {
             // constrain the predicate reg and its value
             cstr_step_bv(s, u, ctx, sme.Pg, 5ULL, sme.Pg.bit_width());
 
-            cstr_step_bv(s, u, ctx, sme.p_regs[5], 0x0101ULL, P_REG_WIDTH); // only first and third element
-            // cstr_step(s, u, ctx, sme.p_regs[5], ctx.bv_val(-1, P_REG_WIDTH)); // all ones
+            cstr_step_bv(s, u, ctx, sme.p_regs[5], 0x0101ULL, sme.P_REG_WIDTH); // only first and third element
+            // cstr_step(s, u, ctx, sme.p_regs[5], ctx.bv_val(-1, sme.P_REG_WIDTH)); // all ones
             
             // constrain tile selection, tile_idx == 3
             cstr_step_bv(s, u, ctx, sme.ZAn, 3ULL, sme.ZAn.bit_width());
@@ -173,7 +173,7 @@ void test_mova(ArmSme& sme) {
             cstr_step_bv(s, u, ctx, sme.Get32BitGPR(3), 0ULL, 32); // W[3] == all zeroes
             cstr_step_bv(s, u, ctx, sme.Imm1, 1ULL, sme.Imm1.bit_width()); // slice 1, leftmost
             cstr_step_bv(s, u, ctx, sme.Pg, 2ULL, sme.Pg.bit_width()); // P[2]
-            cstr_step(s, u, ctx, sme.p_regs[2], ctx.bv_val(-1, P_REG_WIDTH)); // all ones
+            cstr_step(s, u, ctx, sme.p_regs[2], ctx.bv_val(-1, sme.P_REG_WIDTH)); // all ones
             cstr_step_bv(s, u, ctx, sme.Zn, 10ULL, sme.Zn.bit_width()); // Z[10]
             cstr_step(s, u, ctx, sme.z_regs[10], bv_val_128(ctx, 0x1111111122222222ULL, 0x3333333344444444ULL)); // populate the source vector register
         },
@@ -195,7 +195,7 @@ void test_zero(ArmSme &sme) {
     CHECK("ZERO Imm8=0xFF zeroes entire ZA array that was initialized to non-zero", sme, {"ZERO"},
         [&](IlaZ3Unroller &u, z3::solver &s, z3::context &ctx) {
             cstr_step_bv(s, u, ctx, sme.Imm8, 0xFFULL, 8);
-            for (size_t addr = 0; addr < ZA_BYTE_SIZE; addr++) {
+            for (size_t addr = 0; addr < sme.ZA_BYTE_SIZE; addr++) {
                 auto ila_byte = Load(sme.za, BvConst(addr, sme.za.addr_width()));
                 cstr_step_bv(s, u, ctx, ila_byte, 0xAA, BYTE, 0);
             }
@@ -205,7 +205,7 @@ void test_zero(ArmSme &sme) {
             PrintZa(mdl, u, sme, 0);
             std::cout << " after zeroing\n";
             PrintZa(mdl, u, sme, 1);
-            for (size_t addr = 0; addr < ZA_BYTE_SIZE; addr++) {
+            for (size_t addr = 0; addr < sme.ZA_BYTE_SIZE; addr++) {
                 auto ila_byte = Load(sme.za, BvConst(addr, sme.za.addr_width()));
                 auto b_step0 = u.GetZ3Expr(ila_byte, 0);
                 auto b_step1 = u.GetZ3Expr(ila_byte, 1);
@@ -218,7 +218,7 @@ void test_zero(ArmSme &sme) {
     CHECK("ZERO Imm8=0x55 zeroes 16-bit element tile ZA0.H which was previously non-zero", sme, {"ZERO"},
         [&](IlaZ3Unroller &u, z3::solver &s, z3::context &ctx) {
             cstr_step_bv(s, u, ctx, sme.Imm8, 0x55ULL, 8);
-            for (size_t addr = 0; addr < ZA_BYTE_SIZE; addr++) {
+            for (size_t addr = 0; addr < sme.ZA_BYTE_SIZE; addr++) {
                 auto ila_byte = Load(sme.za, BvConst(addr, sme.za.addr_width()));
                 cstr_step_bv(s, u, ctx, ila_byte, 0xFF, BYTE, 0);
             }
@@ -228,7 +228,7 @@ void test_zero(ArmSme &sme) {
             PrintZa(mdl, u, sme, 0);
             std::cout << " now all ZA0.H bytes are zeroed\n";
             PrintZa(mdl, u, sme, 1);
-            size_t dim = SVL_B / HALF; // since we're working with .H suffix
+            size_t dim = sme.SVL_B / HALF; // since we're working with .H suffix
             for (size_t row = 0; row < dim; row++) {
                 auto ila_row = sme.GetHorizontalSlice(sme.za, 0, row, HALF);
                 std::string val = mdl.eval(u.GetZ3Expr(ila_row, 1)).to_string();
@@ -240,7 +240,7 @@ void test_zero(ArmSme &sme) {
     CHECK("ZERO Imm8=0x84 zeroes 32-bit element tile ZA3.S which was previously non-zero", sme, {"ZERO"},
         [&](IlaZ3Unroller &u, z3::solver &s, z3::context &ctx) {
             cstr_step_bv(s, u, ctx, sme.Imm8, 0x84ULL, 8);
-            for (size_t addr = 0; addr < ZA_BYTE_SIZE; addr++) {
+            for (size_t addr = 0; addr < sme.ZA_BYTE_SIZE; addr++) {
                 auto ila_byte = Load(sme.za, BvConst(addr, sme.za.addr_width()));
                 cstr_step_bv(s, u, ctx, ila_byte, 0xFF, BYTE, 0);
             }
@@ -250,7 +250,7 @@ void test_zero(ArmSme &sme) {
             PrintZa(mdl, u, sme, 0);
             std::cout << " now all ZA3.S bytes are zeroed\n";
             PrintZa(mdl, u, sme, 1);
-            size_t dim = SVL_B / WORD; // since it's .S suffix
+            size_t dim = sme.SVL_B / WORD; // since it's .S suffix
             for (size_t row = 0; row < dim; row++) {
                 auto ila_row = sme.GetHorizontalSlice(sme.za, 0, row, WORD);
                 std::string val = mdl.eval(u.GetZ3Expr(ila_row, 1)).to_string();

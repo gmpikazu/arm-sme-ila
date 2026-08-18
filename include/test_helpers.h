@@ -100,7 +100,7 @@ void cstr_step_slice(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, A
 typedef std::unordered_map<size_t, z3::expr> Tracker;
 // Does not constrain, just tracks a mapping (override) between address and z3::expr
 // Must finally call cstr_all_tracked() to constrain and zero out unconstrained addresses
-void track_slice(Tracker& tracker, const z3::expr& value_expr, int tile_idx, int slice_idx, bool is_vertical, const ilang::NumericType& element_size_bits);
+void track_slice(Tracker& tracker, const z3::expr& value_expr, int tile_idx, int slice_idx, bool is_vertical, const ilang::NumericType& element_size_bits, ArmSme& sme);
 void cstr_all_tracked_and_zero(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const Tracker& tracker, ArmSme& sme, int step=0); // constrains the tracker and zeroes out the rest
 
 // TO_STR converts the ila expression into an evaluated string

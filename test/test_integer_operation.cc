@@ -11,9 +11,9 @@ void test_integer_outer_prod(ArmSme& sme) {
             cstr_step_bv(s, u, ctx, sme.ZAda, 0x01ULL, sme.ZAda.bit_width()); // tile 1
             // predicates: 0x1248 = 0b_0001_0010_0100_1000 for selection, cross terms disappear
             cstr_step_bv(s, u, ctx, sme.Pn, 0x01ULL, sme.Pn.bit_width()); // P[1]
-            cstr_step_bv(s, u, ctx, sme.p_regs[1], 0x1248ULL, P_REG_WIDTH); // 0x1248
+            cstr_step_bv(s, u, ctx, sme.p_regs[1], 0x1248ULL, sme.P_REG_WIDTH); // 0x1248
             cstr_step_bv(s, u, ctx, sme.Pm, 0x02ULL, sme.Pm.bit_width()); // P[2]
-            cstr_step_bv(s, u, ctx, sme.p_regs[2], 0x1248ULL, P_REG_WIDTH); // 0x1248
+            cstr_step_bv(s, u, ctx, sme.p_regs[2], 0x1248ULL, sme.P_REG_WIDTH); // 0x1248
             // vector registers
             cstr_step_bv(s, u, ctx, sme.Zn, 0x01ULL, sme.Zn.bit_width()); // Z[1]
             cstr_step(s, u, ctx, sme.z_regs[1], bv_val_128(ctx, 0x0001020304050607ULL, 0x08090A0B0C0D0E0FULL));
@@ -50,9 +50,9 @@ void test_integer_outer_prod(ArmSme& sme) {
             cstr_step_bv(s, u, ctx, sme.ZAda, 0x03ULL, sme.ZAda.bit_width()); // tile 3
             // predicates
             cstr_step_bv(s, u, ctx, sme.Pn, 0x01ULL, sme.Pn.bit_width()); // P[1]
-            cstr_step(s, u, ctx, sme.p_regs[1], ctx.bv_val(-1, P_REG_WIDTH)); // all ones
+            cstr_step(s, u, ctx, sme.p_regs[1], ctx.bv_val(-1, sme.P_REG_WIDTH)); // all ones
             cstr_step_bv(s, u, ctx, sme.Pm, 0x02ULL, sme.Pm.bit_width()); // P[2]
-            cstr_step(s, u, ctx, sme.p_regs[2], ctx.bv_val(-1, P_REG_WIDTH)); // all ones
+            cstr_step(s, u, ctx, sme.p_regs[2], ctx.bv_val(-1, sme.P_REG_WIDTH)); // all ones
             // vector registers
             cstr_step_bv(s, u, ctx, sme.Zn, 0x01ULL, sme.Zn.bit_width()); // Z[1]
             cstr_step(s, u, ctx, sme.z_regs[1], bv_val_128(ctx, 0x0001000200030004ULL, 0x0005000600070008ULL));
@@ -85,11 +85,11 @@ void test_integer_outer_prod(ArmSme& sme) {
             cstr_step_bv(s, u, ctx, sme.ZAda, 0x03ULL, sme.ZAda.bit_width()); // tile 3
             // predicates
             cstr_step_bv(s, u, ctx, sme.Pn, 0x01ULL, sme.Pn.bit_width()); // P[1]
-            // cstr_step(s, u, ctx, sme.p_regs[1], ctx.bv_val(-1, P_REG_WIDTH)); // all ones
-            cstr_step_bv(s, u, ctx, sme.p_regs[1], 0x1111ULL, P_REG_WIDTH); // alternating activation
+            // cstr_step(s, u, ctx, sme.p_regs[1], ctx.bv_val(-1, sme.P_REG_WIDTH)); // all ones
+            cstr_step_bv(s, u, ctx, sme.p_regs[1], 0x1111ULL, sme.P_REG_WIDTH); // alternating activation
             cstr_step_bv(s, u, ctx, sme.Pm, 0x02ULL, sme.Pm.bit_width()); // P[2]
-            // cstr_step(s, u, ctx, sme.p_regs[2], ctx.bv_val(-1, P_REG_WIDTH)); // all ones
-            cstr_step_bv(s, u, ctx, sme.p_regs[2], 0x1111ULL, P_REG_WIDTH); // alternating activation
+            // cstr_step(s, u, ctx, sme.p_regs[2], ctx.bv_val(-1, sme.P_REG_WIDTH)); // all ones
+            cstr_step_bv(s, u, ctx, sme.p_regs[2], 0x1111ULL, sme.P_REG_WIDTH); // alternating activation
             // vector registers
             cstr_step_bv(s, u, ctx, sme.Zn, 0x01ULL, sme.Zn.bit_width()); // Z[1]
             cstr_step(s, u, ctx, sme.z_regs[1], bv_val_128(ctx, 0xFFFFFFFEFFFDFFFCULL, 0x0001000200030004ULL));
@@ -123,10 +123,10 @@ void test_addha_addva(ArmSme& sme) {
             cstr_step_bv(s, u, ctx, sme.ZAda, 2ULL, sme.ZAda.bit_width()); // tile 2
             // predicates
             cstr_step_bv(s, u, ctx, sme.Pn, 0ULL, sme.Pn.bit_width()); // P[0]
-            // cstr_step(s, u, ctx, sme.p_regs[0], ctx.bv_val(-1, P_REG_WIDTH)); // all ones
-            cstr_step_bv(s, u, ctx, sme.p_regs[0], 0xFFF0ULL, P_REG_WIDTH); // except first row
+            // cstr_step(s, u, ctx, sme.p_regs[0], ctx.bv_val(-1, sme.P_REG_WIDTH)); // all ones
+            cstr_step_bv(s, u, ctx, sme.p_regs[0], 0xFFF0ULL, sme.P_REG_WIDTH); // except first row
             cstr_step_bv(s, u, ctx, sme.Pm, 1ULL, sme.Pm.bit_width()); // P[1]
-            cstr_step(s, u, ctx, sme.p_regs[1], ctx.bv_val(-1, P_REG_WIDTH)); // all ones
+            cstr_step(s, u, ctx, sme.p_regs[1], ctx.bv_val(-1, sme.P_REG_WIDTH)); // all ones
             // source vector
             cstr_step_bv(s, u, ctx, sme.Zn, 3ULL, sme.Zn.bit_width()); // Z[3]
             // add 5 on left, 6 on right
@@ -153,9 +153,9 @@ void test_addha_addva(ArmSme& sme) {
             cstr_step_bv(s, u, ctx, sme.ZAda, 2ULL, sme.ZAda.bit_width()); // tile 7
             // predicates
             cstr_step_bv(s, u, ctx, sme.Pn, 0ULL, sme.Pn.bit_width()); // P[0]
-            cstr_step(s, u, ctx, sme.p_regs[0], ctx.bv_val(-1, P_REG_WIDTH)); // all ones
+            cstr_step(s, u, ctx, sme.p_regs[0], ctx.bv_val(-1, sme.P_REG_WIDTH)); // all ones
             cstr_step_bv(s, u, ctx, sme.Pm, 1ULL, sme.Pm.bit_width()); // P[1]
-            cstr_step(s, u, ctx, sme.p_regs[1], ctx.bv_val(-1, P_REG_WIDTH)); // all ones
+            cstr_step(s, u, ctx, sme.p_regs[1], ctx.bv_val(-1, sme.P_REG_WIDTH)); // all ones
             // source vector
             cstr_step_bv(s, u, ctx, sme.Zn, 3ULL, sme.Zn.bit_width()); // Z[3]
             // add 5 on bottom, 6 on top

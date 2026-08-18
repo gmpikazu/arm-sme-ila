@@ -18,23 +18,6 @@ namespace arm {
 
     constexpr NumericType FAULTS_ADDR_WIDTH = 8; // enough to prevent overflow
 
-    // NOTE: current unit tests assume SVL = 128, since we constrain only 128 bits
-    constexpr NumericType SVL = 128; // NOTE: must be >= 128 to support QUAD
-    constexpr NumericType SVL_B = SVL / BYTE;
-    const NumericType LOG2_SVL_B = std::log2(SVL_B);
-    constexpr NumericType GPR_COUNT = 31;
-    const NumericType GPR_ADDR_WIDTH = std::ceil(std::log2(GPR_COUNT));
-    constexpr NumericType ZA_BYTE_SIZE = SVL_B * SVL_B;
-    const NumericType ZA_ADDR_WIDTH = std::log2(ZA_BYTE_SIZE);
-    constexpr NumericType Z_REG_COUNT = 32;
-    const NumericType Z_ADDR_WIDTH = std::log2(Z_REG_COUNT);
-    const NumericType Z_REG_WIDTH = SVL;
-    constexpr NumericType P_REG_COUNT = 8;
-    // ASK: is it truly SVL_B bits? 8 or 16 p-registers for SME??
-    // ASK: are they indexed from LSB or MSB?
-    const NumericType P_ADDR_WIDTH = std::log2(P_REG_COUNT);
-    const NumericType P_REG_WIDTH = SVL_B; // NOTE: current unit tests assume P_REG_WIDTH = 16 since we use 4 hex digits
-    const NumericType DRAM_ADDR_WIDTH = 128; // ASK: must be different from fp16, fp32, fp64, else will be treated same as them??
 
 using namespace ilang;
 
@@ -43,7 +26,25 @@ class ArmSme {
     // baked into the AST during compile time, NOT runtime
     const bool ZA_is_LE; // current implementation fixes this to FALSE (since ZA is Big Endian)
     const bool DRAM_is_LE; // NOTE: ZA is Big Endian internally, for now just care about DRAM endianness
-    
+
+  public:
+    // NOTE: current unit tests assume SVL = 128, since we constrain only 128 bits
+    const NumericType SVL; // NOTE: must be >= 128 to support QUAD
+    const NumericType SVL_B;
+    const NumericType LOG2_SVL_B;
+    const NumericType GPR_COUNT;
+    const NumericType GPR_ADDR_WIDTH;
+    const NumericType ZA_BYTE_SIZE;
+    const NumericType ZA_ADDR_WIDTH;
+    const NumericType Z_REG_COUNT;
+    const NumericType Z_ADDR_WIDTH;
+    const NumericType Z_REG_WIDTH;
+    const NumericType P_REG_COUNT; // ASK: is it truly SVL_B bits? 8 or 16 p-registers for SME?? are they indexed from LSB or MSB?
+    const NumericType P_ADDR_WIDTH;
+    const NumericType P_REG_WIDTH; // NOTE: current unit tests assume P_REG_WIDTH = 16 since we use 4 hex digits
+    const NumericType DRAM_ADDR_WIDTH; // ASK: must be different from fp16, fp32, fp64, else will be treated same as them??
+
+  private:
     void AddInstructions();
 
     // NOTE: convert tile_idx into constrained range: 0 to num_tiles-1
@@ -290,7 +291,7 @@ class ArmSme {
     ExprRef WB_svl_vector; // NOTE: is exactly what was written to DRAM (same endianness)
     ExprRef WB_base_addr;
 
-    ArmSme(bool DRAM_is_LE);
+    ArmSme(bool DRAM_is_LE, NumericType SVL);
     Ila& get() { return m; }
     
     // public helper functions for tile slices

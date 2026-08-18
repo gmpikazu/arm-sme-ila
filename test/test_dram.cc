@@ -12,8 +12,8 @@ namespace DRAM_Rough_Helper {
 
 typedef std::unordered_map<size_t, ExprRef> DramTracker;
 
-static void update_tracker(DramTracker& t, size_t base_addr, const ExprRef svl_vector) {
-    assert(svl_vector.bit_width() == SVL);
+static void update_tracker(DramTracker& t, size_t base_addr, const ExprRef svl_vector, ArmSme& sme) {
+    assert(svl_vector.bit_width() == sme.SVL);
     auto GetVecByteLSB = [&](size_t idx) -> ExprRef {
         // get element of vector from LSB
         size_t rightmost = BYTE * idx;
@@ -22,11 +22,11 @@ static void update_tracker(DramTracker& t, size_t base_addr, const ExprRef svl_v
     };
     auto GetVecByteMSB = [&](size_t idx) -> ExprRef {
         // get element of vector from MSB
-        size_t mirrored_idx = SVL_B - 1 - idx;
+        size_t mirrored_idx = sme.SVL_B - 1 - idx;
         return GetVecByteLSB(mirrored_idx);
     };
 
-    for (size_t i = 0; i < SVL_B; i++) {
+    for (size_t i = 0; i < sme.SVL_B; i++) {
         auto byte = GetVecByteMSB(i);
         t.insert_or_assign(base_addr+i, byte);
     }
@@ -34,12 +34,12 @@ static void update_tracker(DramTracker& t, size_t base_addr, const ExprRef svl_v
 
 // modifies the reference to FuncRef& DRAM_UF
 // write values are available at THE SAME STEP where we need to read it (apply step to both ila_expr)
-static void cstr_tracked_dram(IlaZ3Unroller& u, z3::solver& s, z3::context& ctx, 
-                              FuncRef& DRAM_UF, const DramTracker& t, int step)
+static void cstr_tracked_dram(IlaZ3Unroller& u, z3::solver& s, z3::context& ctx,
+                              FuncRef& DRAM_UF, const DramTracker& t, int step, ArmSme& sme)
 {
     assert(step > 0);
     for (auto& [addr, ila_expr] : t) {
-        cstr_step_ila(s, u, ctx, DRAM_UF(BvConst(addr, DRAM_ADDR_WIDTH)), step, ila_expr, step);
+        cstr_step_ila(s, u, ctx, DRAM_UF(BvConst(addr, sme.DRAM_ADDR_WIDTH)), step, ila_expr, step);
     }
 }
 
@@ -53,7 +53,7 @@ void test_uf_dram(ArmSme& sme_DramLE, ArmSme& sme_DramBE) {
             // tile
             cstr_step_bv(s, u, ctx, sme.ZAt, 1ULL, sme.ZAt.bit_width()); // tile 1
             Tracker t;
-            track_slice(t, bv_val_128(ctx, 0x0011223344556677ULL, 0x8899AABBCCDDEEFFULL), 1, 3, true, HALF);
+            track_slice(t, bv_val_128(ctx, 0x0011223344556677ULL, 0x8899AABBCCDDEEFFULL), 1, 3, true, HALF, sme);
             cstr_all_tracked_and_zero(s, u, ctx, t, sme);
             // slice
             cstr_step_bool(s, u, ctx, sme.HV, true); // vertical
@@ -62,7 +62,7 @@ void test_uf_dram(ArmSme& sme_DramLE, ArmSme& sme_DramBE) {
             cstr_step_bv(s, u, ctx, sme.Imm3, 3ULL, sme.Imm3.bit_width()); // slice 3
             // predicates
             cstr_step_bv(s, u, ctx, sme.Pg, 1ULL, sme.Pg.bit_width());
-            cstr_step_bv(s, u, ctx, sme.p_regs[1], 0x5555ULL, P_REG_WIDTH); // all active
+            cstr_step_bv(s, u, ctx, sme.p_regs[1], 0x5555ULL, sme.P_REG_WIDTH); // all active
             // base & offset
             cstr_step_bv(s, u, ctx, sme.Rn, 31ULL, sme.Rn.bit_width()); // base = SP
             cstr_step_bv(s, u, ctx, sme.SP, 0ULL, 64); // value of SP
@@ -70,8 +70,8 @@ void test_uf_dram(ArmSme& sme_DramLE, ArmSme& sme_DramBE) {
             cstr_step_bv(s, u, ctx, sme.GPRs[30], 1ULL, 64); // offset = 1 (starts at index 1 from base)
 
             // NOTE: weird constraints
-            cstr_step(s, u, ctx, sme.DRAM_UF(BvConst(1, DRAM_ADDR_WIDTH)), ctx.bv_val(1, BYTE), 0);
-            cstr_step(s, u, ctx, sme.DRAM_UF(BvConst(1, DRAM_ADDR_WIDTH)), ctx.bv_val(2, BYTE), 1);
+            cstr_step(s, u, ctx, sme.DRAM_UF(BvConst(1, sme.DRAM_ADDR_WIDTH)), ctx.bv_val(1, BYTE), 0);
+            cstr_step(s, u, ctx, sme.DRAM_UF(BvConst(1, sme.DRAM_ADDR_WIDTH)), ctx.bv_val(2, BYTE), 1);
         },
         [&](z3::model& mdl, IlaZ3Unroller& u) {
             // NOTE: SP alignment fault only happens when IsAnyActivePredicate == false
@@ -79,8 +79,8 @@ void test_uf_dram(ArmSme& sme_DramLE, ArmSme& sme_DramBE) {
             PrintZa(mdl, u, sme, 0);
             auto slice = sme.GetVerticalSlice(sme.za, 1, 3, HALF);
             PRINT(slice, 0, u, mdl, "Vertical Slice");
-            PrintDRAM(mdl, u, sme, 0, 1, 3*SVL_B);
-            auto dram_vec_za_endian = sme.DRAM_GetVectorAsZaEndian(2, HALF, SVL, true);
+            PrintDRAM(mdl, u, sme, 0, 1, 3*sme.SVL_B);
+            auto dram_vec_za_endian = sme.DRAM_GetVectorAsZaEndian(2, HALF, sme.SVL, true);
             auto wb_vec = sme.WB_svl_vector;
             auto wb_addr = sme.WB_base_addr;
             PRINT(wb_addr, 1, u, mdl, "WB addr");
@@ -94,7 +94,7 @@ void test_uf_dram(ArmSme& sme_DramLE, ArmSme& sme_DramBE) {
     #undef sme
 }
 
-void test_store(ArmSme& sme_DramLE, ArmSme& sme_DramBE) { 
+void test_store(ArmSme& sme_DramLE, ArmSme& sme_DramBE) {
     #define sme sme_DramBE // doesn't matter for STR
     CHECK("STR idk ZA0H.B[5]", sme, {"STR"},
         [&](IlaZ3Unroller& u, z3::solver& s, z3::context& ctx) {
@@ -105,7 +105,7 @@ void test_store(ArmSme& sme_DramLE, ArmSme& sme_DramBE) {
             // STR starts at (base + Imm4*SVL_B) and row_index = W[12]+Imm4
             cstr_step_bv(s, u, ctx, sme.Imm4, 2ULL, sme.Imm4.bit_width()); // Imm4=2
             Tracker t;
-            track_slice(t, bv_val_128(ctx, 0x0011223344556677ULL, 0x8899AABBCCDDEEFFULL), 0, 5, false, BYTE);
+            track_slice(t, bv_val_128(ctx, 0x0011223344556677ULL, 0x8899AABBCCDDEEFFULL), 0, 5, false, BYTE, sme);
             cstr_all_tracked_and_zero(s, u, ctx, t, sme);
         },
         [&](z3::model& mdl, IlaZ3Unroller& u) {
@@ -116,8 +116,8 @@ void test_store(ArmSme& sme_DramLE, ArmSme& sme_DramBE) {
 
         #if USE_DRAM_MEMSTATE
             std::cout << " horizontal row 2 starting at address 16 now filled\n";
-            PrintDRAM(mdl, u, sme, 16, 1, 4*SVL_B);
-            auto dram_slice = sme.DRAM_GetVectorAsZaEndian(48, BYTE, SVL, false); // start at addr 48
+            PrintDRAM(mdl, u, sme, 16, 1, 4*sme.SVL_B);
+            auto dram_slice = sme.DRAM_GetVectorAsZaEndian(48, BYTE, sme.SVL, false); // start at addr 48
             auto hor_slice = sme.GetHorizontalSlice(sme.za, 0, 5, BYTE);
             std::cout << " these two are BYTE-swapped\n";
             PRINT(dram_slice, 1, u, mdl, "DRAM slice as ZA endian");
@@ -145,7 +145,7 @@ void test_store(ArmSme& sme_DramLE, ArmSme& sme_DramBE) {
             // tile
             cstr_step_bv(s, u, ctx, sme.ZAt, 1ULL, sme.ZAt.bit_width()); // tile 1
             Tracker t;
-            track_slice(t, bv_val_128(ctx, 0x0011223344556677ULL, 0x8899AABBCCDDEEFFULL), 1, 3, true, HALF);
+            track_slice(t, bv_val_128(ctx, 0x0011223344556677ULL, 0x8899AABBCCDDEEFFULL), 1, 3, true, HALF, sme);
             cstr_all_tracked_and_zero(s, u, ctx, t, sme);
             // slice
             cstr_step_bool(s, u, ctx, sme.HV, true); // vertical
@@ -154,7 +154,7 @@ void test_store(ArmSme& sme_DramLE, ArmSme& sme_DramBE) {
             cstr_step_bv(s, u, ctx, sme.Imm3, 3ULL, sme.Imm3.bit_width()); // slice 3
             // predicates
             cstr_step_bv(s, u, ctx, sme.Pg, 1ULL, sme.Pg.bit_width());
-            cstr_step_bv(s, u, ctx, sme.p_regs[1], 0x5555ULL, P_REG_WIDTH); // all active
+            cstr_step_bv(s, u, ctx, sme.p_regs[1], 0x5555ULL, sme.P_REG_WIDTH); // all active
             // base & offset
             cstr_step_bv(s, u, ctx, sme.Rn, 31ULL, sme.Rn.bit_width()); // base = SP
             cstr_step_bv(s, u, ctx, sme.SP, 0ULL, 64); // value of SP
@@ -171,14 +171,14 @@ void test_store(ArmSme& sme_DramLE, ArmSme& sme_DramBE) {
         #if USE_DRAM_MEMSTATE
             auto wb_vec = sme.WB_svl_vector;
             auto wb_addr = sme.WB_base_addr;
-            PRINT(wb_addr, 1, u, mdl, "WB addr"); 
+            PRINT(wb_addr, 1, u, mdl, "WB addr");
             EXPECT_TRUE(TO_STR(wb_addr, 1, u, mdl) == "#x00000000000000000000000000000002");
 
-            PrintDRAM(mdl, u, sme, 0, 1, 3*SVL_B);
-            auto dram_vec_za_endian = sme.DRAM_GetVectorAsZaEndian(2, HALF, SVL, true);
+            PrintDRAM(mdl, u, sme, 0, 1, 3*sme.SVL_B);
+            auto dram_vec_za_endian = sme.DRAM_GetVectorAsZaEndian(2, HALF, sme.SVL, true);
 
-            std::cout << " these two are HALF-swapped\n"; 
-            PRINT(dram_vec_za_endian, 1, u, mdl, "DRAM vector"); 
+            std::cout << " these two are HALF-swapped\n";
+            PRINT(dram_vec_za_endian, 1, u, mdl, "DRAM vector");
             PRINT(wb_vec, 1, u, mdl, "WB vector");
             EXPECT_TRUE(TO_STR(dram_vec_za_endian, 1, u, mdl) == "#x00112233445566778899aabbccddeeff");
             EXPECT_TRUE(TO_STR(dram_vec_za_endian, 1, u, mdl) == TO_STR(slice, 1, u, mdl)); // invariant
@@ -186,7 +186,7 @@ void test_store(ArmSme& sme_DramLE, ArmSme& sme_DramBE) {
         #else
             auto wb_vec = sme.WB_svl_vector;
             auto wb_addr = sme.WB_base_addr;
-            PRINT(wb_addr, 1, u, mdl, "WB addr"); 
+            PRINT(wb_addr, 1, u, mdl, "WB addr");
             EXPECT_TRUE(TO_STR(wb_addr, 1, u, mdl) == "#x00000000000000000000000000000002");
             EXPECT_TRUE(TO_STR(wb_vec, 1, u, mdl) == "#xeeffccddaabb88996677445522330011");
         #endif
@@ -197,7 +197,7 @@ void test_store(ArmSme& sme_DramLE, ArmSme& sme_DramBE) {
 
 // NOTE: base (either SP or X reg) needs to be 16-byte aligned or else faults
 // for LDR, offset will never cause misalignment because it is a multiple of 16
-void test_load(ArmSme& sme_DramLE, ArmSme& sme_DramBE) { 
+void test_load(ArmSme& sme_DramLE, ArmSme& sme_DramBE) {
     #define sme sme_DramBE // doesn't matter for LDR
     CHECK("LDR to ZA[3] (equivalent to ZA0H[3]) starting at an offset", sme, {"LDR"},
         [&](IlaZ3Unroller& u, z3::solver& s, z3::context& ctx) {
@@ -207,7 +207,7 @@ void test_load(ArmSme& sme_DramLE, ArmSme& sme_DramBE) {
             cstr_step_bv(s, u, ctx, sme.Get64BitGPR(31, true), 0ULL, 64); // SP=0
             // LDR starts at (base + Imm4*SVL_B) and row_index = W[12]+Imm4
             cstr_step_bv(s, u, ctx, sme.Imm4, 1ULL, sme.Imm4.bit_width()); // Imm4=1
-            for (size_t i = 0; i < 3*SVL_B; i++) {
+            for (size_t i = 0; i < 3*sme.SVL_B; i++) {
                 cstr_step(s, u, ctx, sme.DRAM_GetByteNoEndian(i), ctx.bv_val(i, BYTE));
             }
         },
@@ -215,10 +215,10 @@ void test_load(ArmSme& sme_DramLE, ArmSme& sme_DramBE) {
             auto base = sme.Get64BitGPR(31, true);
             EXPECT_TRUE(TO_STR(base, 0, u, mdl) == TO_STR(sme.SP, 0, u, mdl)); // base must be SP
             std::cout << " initialize a monotonic sequence in DRAM\n";
-            PrintDRAM(mdl, u, sme, 0, 0, 3*SVL_B);
-            // PrintDRAM(mdl, u, sme, SVL_B, 0, SVL_B);
-            // PrintDRAM(mdl, u, sme, 2*SVL_B, 0, SVL_B);
-            
+            PrintDRAM(mdl, u, sme, 0, 0, 3*sme.SVL_B);
+            // PrintDRAM(mdl, u, sme, sme.SVL_B, 0, sme.SVL_B);
+            // PrintDRAM(mdl, u, sme, 2*sme.SVL_B, 0, sme.SVL_B);
+
             std::cout << " row 3 has been filled\n";
             PrintZa(mdl, u, sme, 1);
             auto slice = sme.GetHorizontalSlice(sme.za, 0, 3, BYTE);
@@ -239,7 +239,7 @@ void test_load(ArmSme& sme_DramLE, ArmSme& sme_DramBE) {
             cstr_step_bv(s, u, ctx, sme.Imm3, 3ULL, sme.Imm3.bit_width()); // slice 3
             // predicates
             cstr_step_bv(s, u, ctx, sme.Pg, 1ULL, sme.Pg.bit_width());
-            cstr_step_bv(s, u, ctx, sme.p_regs[1], 0x5555ULL, P_REG_WIDTH); // all active
+            cstr_step_bv(s, u, ctx, sme.p_regs[1], 0x5555ULL, sme.P_REG_WIDTH); // all active
             // base & offset
             cstr_step_bv(s, u, ctx, sme.Rn, 31ULL, sme.Rn.bit_width()); // base = SP
             // NOTE: SP alignment fault only happens when IsAnyActivePredicate == false
@@ -254,13 +254,13 @@ void test_load(ArmSme& sme_DramLE, ArmSme& sme_DramBE) {
         },
         [&](z3::model& mdl, IlaZ3Unroller& u) {
             std::cout << " check endianness of DRAM\n";
-            PrintDRAM(mdl, u, sme, 0, 0, 3*SVL_B);
+            PrintDRAM(mdl, u, sme, 0, 0, 3*sme.SVL_B);
             // 0xfffd stored in reverse-byte-order
             EXPECT_TRUE(TO_STR(sme.DRAM_GetByteNoEndian(6), 1, u, mdl) == "#xfd");
             EXPECT_TRUE(TO_STR(sme.DRAM_GetByteNoEndian(7), 1, u, mdl) == "#xff");
 
             std::cout << " vertical slice filled\n";
-            PRINT(sme.DRAM_GetVectorAsZaEndian(6, HALF, SVL, true), 1, u, mdl, "DRAM VECTOR");
+            PRINT(sme.DRAM_GetVectorAsZaEndian(6, HALF, sme.SVL, true), 1, u, mdl, "DRAM VECTOR");
             PRINT(sme.GetVerticalSlice(sme.za, 1, 3, HALF), 1, u, mdl, "SLICE");
             PrintZa(mdl, u, sme, 1);
             std::vector<ExprRef> slices;
@@ -291,7 +291,7 @@ void test_load(ArmSme& sme_DramLE, ArmSme& sme_DramBE) {
             cstr_step_bv(s, u, ctx, sme.Imm4, 1ULL, sme.Imm4.bit_width()); // slice 1 (left)
             // predicates
             cstr_step_bv(s, u, ctx, sme.Pg, 1ULL, sme.Pg.bit_width());
-            cstr_step_bv(s, u, ctx, sme.p_regs[1], 0x0101ULL, P_REG_WIDTH); // predicate
+            cstr_step_bv(s, u, ctx, sme.p_regs[1], 0x0101ULL, sme.P_REG_WIDTH); // predicate
             // base & offset
             cstr_step_bv(s, u, ctx, sme.Rn, 3ULL, sme.Rn.bit_width()); // X[3]
             cstr_step_bv(s, u, ctx, sme.GPRs[3], 14ULL, 64); // base = 14
@@ -314,7 +314,7 @@ void test_load(ArmSme& sme_DramLE, ArmSme& sme_DramBE) {
             // NOTE: if ZA and DRAM differs in endianness, DRAM_GetVectorAsZaEndian returns the exact same SVL bits regardless of element_size_bits because the SVL bit vector rotates 180 degrees
             // when ZA and DRAM shares the same endianness, then the return vector is not merely a mirror
             std::cout << " INVARIANT: checking DRAM_GetElement and DRAM_GetVector helpers (must equal)\n";
-            auto dram_vector_as_za_endian = sme.DRAM_GetVectorAsZaEndian(14, DOUBLE, SVL, true);
+            auto dram_vector_as_za_endian = sme.DRAM_GetVectorAsZaEndian(14, DOUBLE, sme.SVL, true);
             auto ver_slice = sme.GetVerticalSlice(sme.za, 5, 1, DOUBLE);
             PRINT(dram_vector_as_za_endian, 1, u, mdl, "DRAM");
             PRINT(ver_slice, 1, u, mdl, "slice");
