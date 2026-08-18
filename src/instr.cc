@@ -1,4 +1,5 @@
 #include "arm.h"
+#include "config.h"
 #include <cmath>
 
 namespace arm {

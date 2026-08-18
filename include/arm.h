@@ -8,15 +8,6 @@
 
 namespace arm {
     
-    // NOTE: activates MemState DRAM instead of UF for reading
-    #define USE_DRAM_MEMSTATE true
-
-    // TODO: need to change all usage sites
-    #define TEMP_DECODE BoolConst(true)
-    #define TEMP_OPCODE 0x01
-    #define TEMP_BIT_WIDTH 128
-    #define TEMP_LARGEST_ADDR_WIDTH 256
-
     typedef uint64_t NumericType; // same as ilang++.h
 
     #define BYTE 8
@@ -50,8 +41,8 @@ using namespace ilang;
 class ArmSme {
     Ila m;
     // baked into the AST during compile time, NOT runtime
-    bool ZA_is_LE; // current implementation fixes this to FALSE (since ZA is Big Endian)
-    bool DRAM_is_LE; // NOTE: ZA is Big Endian internally, for now just care about DRAM endianness
+    const bool ZA_is_LE; // current implementation fixes this to FALSE (since ZA is Big Endian)
+    const bool DRAM_is_LE; // NOTE: ZA is Big Endian internally, for now just care about DRAM endianness
     
     void AddInstructions();
 

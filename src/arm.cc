@@ -1,4 +1,5 @@
 #include "arm.h"
+#include "config.h"
 
 namespace arm {
     ArmSme::ArmSme(bool DRAM_is_LE) :
