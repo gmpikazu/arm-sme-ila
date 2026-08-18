@@ -75,6 +75,7 @@ void cstr_step_ila(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, con
 // Create a 128-bit Z3 expression from two 64-bit halves
 // Z3's ctx.bv_val only supports up to 64-bit, so we need this helper
 z3::expr bv_val_128(z3::context &ctx, uint64_t high_half, uint64_t low_half);
+z3::expr bv_val_N(z3::context &ctx, std::vector<uint64_t> list);
 z3::expr bv_val(z3::context &ctx, std::vector<uint64_t> values);
 
 // Get byte at specific row and column in ZA tile (row-major internal storage)

@@ -4,23 +4,30 @@
 using namespace ilang;
 using namespace arm;
 
-// TODO: need test with bigger SVL
-void test_revd(ArmSme& sme) {
-    CHECK("asdkflasdfj", sme, {"REVD.Q"},
+void test_revd(ArmSme& sme_LargeSVL) {
+    #define sme sme_LargeSVL
+    CHECK("REVD.Q swaps 64-bit halves of each QUAD element in 256-bit SVL vector", sme, {"REVD.Q"},
         [&](IlaZ3Unroller& u, z3::solver& s, z3::context& ctx) {
             cstr_step_bv(s, u, ctx, sme.Zd, 3ULL, sme.Zd.bit_width()); // Zd = 3
             cstr_step(s, u, ctx, sme.z_regs[3], ctx.bv_val(-1, sme.Z_REG_WIDTH)); // repeated F initially
             cstr_step_bv(s, u, ctx, sme.Pg, 5ULL, sme.Pg.bit_width());
             cstr_step(s, u, ctx, sme.p_regs[5], ctx.bv_val(-1, sme.P_REG_WIDTH)); // all ones
             cstr_step_bv(s, u, ctx, sme.Zn, 7ULL, sme.Zn.bit_width());
-            cstr_step(s, u, ctx, sme.z_regs[7], bv_val_128(ctx, 0x0011223344556677, 0x8899AABBCCDDEEFF));
+            cstr_step(s, u, ctx, sme.z_regs[7], bv_val_N(ctx, {
+                0x0011223344556677, 0x8899AABBCCDDEEFF,
+                0x0001020304050607, 0x08090A0B0C0D0E0F
+            }));
         },
         [&](z3::model& mdl, IlaZ3Unroller& u) {
-            PRINT(sme.z_regs[3], 0, u, mdl);
-            PRINT(sme.z_regs[3], 1, u, mdl);
-            EXPECT_TRUE(false); // TODO: test with bigger SVL
+            auto dest = sme.z_regs[3];
+            PRINT(sme.z_regs[7], 0, u, mdl, "source @ 0");
+            PRINT(dest, 0, u, mdl, "dest @ 0");
+            PRINT(dest, 1, u, mdl, "dest @ 1");
+            auto strexpr = TO_STR(dest, 1, u, mdl);
+            EXPECT_TRUE(strexpr == "#x8899aabbccddeeff001122334455667708090a0b0c0d0e0f0001020304050607");
         }
     );
+    #undef sme
 }
 
 void test_clamp(ArmSme& sme) {

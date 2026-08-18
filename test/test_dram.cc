@@ -96,7 +96,7 @@ void test_uf_dram(ArmSme& sme_DramLE, ArmSme& sme_DramBE) {
 
 void test_store(ArmSme& sme_DramLE, ArmSme& sme_DramBE) {
     #define sme sme_DramBE // doesn't matter for STR
-    CHECK("STR idk ZA0H.B[5]", sme, {"STR"},
+    CHECK("STR from ZA[5] (equivalent to ZA0H[5]) to DRAM (BE) with offset", sme, {"STR"},
         [&](IlaZ3Unroller& u, z3::solver& s, z3::context& ctx) {
             cstr_step_bv(s, u, ctx, sme.Rv, 12ULL, sme.Rv.bit_width()); // W[12]
             cstr_step_bv(s, u, ctx, sme.Get32BitGPR(12), 3ULL, 32); // W[12] = 3

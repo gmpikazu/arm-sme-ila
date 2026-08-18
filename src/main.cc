@@ -35,9 +35,11 @@ void list_states(ArmSme& sme) {
 int main() {
     fLI::FLAGS_minloglevel = 2; // NOTE: remove noisy ILAng logs
 
-    // NOTE: only DRAM tests require both, others don't matter
+    // only DRAM tests require LE and BE, others don't care
     ArmSme sme_DramLE(true, 128); // DRAM is Little Endian
     ArmSme sme_DramBE(false, 128); // DRAM is Big Endian
+    // only REVD.Q test require a bigger SVL for QUAD tests
+    ArmSme sme_LargeSVL(true, 256); // fits 2 QUAD elements
     
     // list everything
     list_states(sme_DramLE);
@@ -58,12 +60,12 @@ int main() {
     test_load(sme_DramLE, sme_DramBE);
     test_store(sme_DramLE, sme_DramBE);
     test_psel(sme_DramLE);
+    test_revd(sme_LargeSVL);
+    test_clamp(sme_DramLE);
 
     // NOTE: under development
     // test_float_outer_prod(sme_DramLE); // TODO:
     // test_uf_dram(sme_DramLE, sme_DramBE);
-    // test_revd(sme_DramLE); // TODO: test with bigger SVL
-    test_clamp(sme_DramLE);
     
     // summary
     print_test_summary();

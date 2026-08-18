@@ -58,6 +58,15 @@ z3::expr bv_val_128(z3::context &ctx, uint64_t high_half, uint64_t low_half) {
     return z3::concat(ctx.bv_val(high_half, 64), ctx.bv_val(low_half, 64));
 }
 
+z3::expr bv_val_N(z3::context &ctx, std::vector<uint64_t> list) {
+    assert(list.size() > 0);
+    auto res = ctx.bv_val(list[0], 64);
+    for (size_t i = 1; i < list.size(); i++) {
+        res = z3::concat(res, ctx.bv_val(list[i], 64));
+    }
+    return res;
+}
+
 // Turns array of 64-bit hexadecimal into a bigger one through concatenation
 // values[0] becomes MSB
 z3::expr bv_val(z3::context &ctx, std::vector<uint64_t> values) {
