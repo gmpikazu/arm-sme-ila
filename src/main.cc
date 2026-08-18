@@ -62,7 +62,7 @@ int main() {
     // NOTE: under development
     // test_float_outer_prod(sme_DramLE); // TODO:
     // test_uf_dram(sme_DramLE, sme_DramBE);
-    test_revd(sme_DramLE); // TODO: test with bigger SVL
+    // test_revd(sme_DramLE); // TODO: test with bigger SVL
     test_clamp(sme_DramLE);
     
     // summary

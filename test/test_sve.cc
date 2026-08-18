@@ -24,10 +24,39 @@ void test_revd(ArmSme& sme) {
 }
 
 void test_clamp(ArmSme& sme) {
-    CHECK("", sme, {""},
+    CHECK("UCLAMP.S makes each element atleast 0x1000", sme, {"UCLAMP.S"},
         [&](IlaZ3Unroller& u, z3::solver& s, z3::context& ctx) {
+            cstr_step_bv(s, u, ctx, sme.Zd, 7ULL, sme.Zd.bit_width());
+            // contains vector [-8, -7, ..., -1, 1, 2, ..., 8] of 16 BYTE elements
+            cstr_step(s, u, ctx, sme.z_regs[7], bv_val_128(ctx, 0xF8F9FAFBFCFDFEFF, 0x0102030405060708));
+            cstr_step_bv(s, u, ctx, sme.Zn, 1ULL, sme.Zn.bit_width()); // min
+            cstr_step(s, u, ctx, sme.z_regs[1], bv_val_128(ctx, 0x1000100010001000, 0x1000100010001000));
+            cstr_step_bv(s, u, ctx, sme.Zm, 2ULL, sme.Zm.bit_width()); // max
+            cstr_step(s, u, ctx, sme.z_regs[2], bv_val_128(ctx, 0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF));
         },
         [&](z3::model& mdl, IlaZ3Unroller& u) {
+            auto dest = sme.z_regs[7];
+            PRINT(dest, 0, u, mdl, "before clamping");
+            PRINT(dest, 1, u, mdl, "after clamping");
+            EXPECT_TRUE(TO_STR(dest, 1, u, mdl) == "#xf8f9fafbfcfdfeff1000100010001000");
+        }
+    );
+
+    CHECK("SCLAMP.B only allows nonnegative elements to remain", sme, {"SCLAMP.B"},
+        [&](IlaZ3Unroller& u, z3::solver& s, z3::context& ctx) {
+            cstr_step_bv(s, u, ctx, sme.Zd, 7ULL, sme.Zd.bit_width());
+            // contains vector [-8, -7, ..., -1, 1, 2, ..., 8] of 16 BYTE elements
+            cstr_step(s, u, ctx, sme.z_regs[7], bv_val_128(ctx, 0xF8F9FAFBFCFDFEFF, 0x0102030405060708));
+            cstr_step_bv(s, u, ctx, sme.Zn, 1ULL, sme.Zn.bit_width()); // min
+            cstr_step(s, u, ctx, sme.z_regs[1], ctx.bv_val(0, Z_REG_WIDTH));
+            cstr_step_bv(s, u, ctx, sme.Zm, 2ULL, sme.Zm.bit_width()); // max
+            cstr_step(s, u, ctx, sme.z_regs[2], bv_val_128(ctx, 0x7F7F7F7F7F7F7F7F, 0x7F7F7F7F7F7F7F00));
+        },
+        [&](z3::model& mdl, IlaZ3Unroller& u) {
+            auto dest = sme.z_regs[7];
+            PRINT(dest, 0, u, mdl, "before clamping");
+            PRINT(dest, 1, u, mdl, "after clamping");
+            EXPECT_TRUE(TO_STR(dest, 1, u, mdl) == "#x00000000000000000102030405060700");
         }
     );
 }

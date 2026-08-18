@@ -1,5 +1,6 @@
 #include "arm.h"
 #include "config.h"
+#include <algorithm>
 #include <cmath>
 
 namespace arm {
@@ -336,9 +337,11 @@ namespace arm {
             NumericType elements = SVL / esize;
             auto mask = GetPredicateRegister(Pg);
             auto operand = GetVectorRegister(Zn);
-            auto result = GetVectorRegister(Zd); // will be modified below
+            auto old_dest = GetVectorRegister(Zd);
 
             assert(elements > 0); // SVL greater than esize
+            std::vector<ExprRef> result_elems;
+            result_elems.reserve(elements);
             assert(esize == swsize * 2); // swsize exactly half, since 0,1 index is used
             for (size_t i = 0; i < elements; i++) {
                 auto src_elem = GetElementInVectorFromLSB(operand, i, esize);
@@ -348,12 +351,13 @@ namespace arm {
                 assert(reversed.bit_width() == src_elem.bit_width() && reversed.bit_width() == esize);
 
                 // inactive remains unmodified
-                auto old_dest_elem = GetElementInVectorFromLSB(result, i, esize);
+                auto old_dest_elem = GetElementInVectorFromLSB(old_dest, i, esize);
                 auto active = (GetPredBitFromLSB(mask, i, esize) != 0);
                 auto new_elem = Ite(active, reversed, old_dest_elem);
-
-                result = SetElementInVectorFromLSB(result, i, esize, new_elem, SVL);
+                result_elems.push_back(new_elem);
             }
+            std::reverse(result_elems.begin(), result_elems.end());
+            auto result = Concatenate(result_elems);
             UpdateSingleVectorRegister(instr, Zd, result);
         }
 
@@ -371,8 +375,8 @@ namespace arm {
                 auto min_op = GetVectorRegister(Zn);
                 auto max_op = GetVectorRegister(Zm);
                 auto dest_old = GetVectorRegister(Zd);
-                auto result = BvConst(0, dest_old.bit_width());
-                assert(result.bit_width() == Z_REG_WIDTH);
+                std::vector<ExprRef> result_elems;
+                result_elems.reserve(dest_old.bit_width());
 
                 NumericType elements = SVL / esize;
                 for (size_t i = 0; i < elements; i++) {
@@ -381,8 +385,11 @@ namespace arm {
                     auto elem = GetElementInVectorFromLSB(dest_old, i, esize);
                     
                     auto res_elem = is_signed ? Smin(Smax(min_elem, elem), max_elem) : Umin(Umax(elem, min_elem), max_elem);
-                    result = SetElementInVectorFromLSB(result, i, esize, res_elem, SVL);
+                    result_elems.push_back(res_elem);
                 }
+                std::reverse(result_elems.begin(), result_elems.end());
+                auto result = Concatenate(result_elems);
+                assert(result.bit_width() == Z_REG_WIDTH);
                 UpdateSingleVectorRegister(instr, Zd, result);
             };
             f("SCLAMP", ".B", TEMP_OPCODE, BYTE, true);
