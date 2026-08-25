@@ -3,8 +3,19 @@
 > STR test, SVE2 test, FP structural test (please don't timeout)
 - what is difference between `s.add(u.GetZ3Expr() == cstr)` and `u.AddStepPred() + u.Unroll`? and `s.Add(u.Equal(..))` constrain future `Load` using previous `Store` concretely first, before moving on to associative list in the unroller
 
+## Report
+- How to compute `DotAdd` in infinite precision before rounding once realistically?
+- I hope that `z3::fma` has **single rounding** as I assume
+- Our Z3 (checking `/usr/include`) does not expose `substitute_funs` and even if we had it, the operation is quite basic
+    - Our need is to replace **every single** UF inside the `tr` with the corresponding body
+    - AI Agent suggested a recurisve walker implementation to traverse `tr` but I'm not sure what `tr` looks like
+        - I understand the substitution procedure but not the internal representation of `tr` for recursion
+- How to make DotAdd with Single Rounding, must perform arithmetic in a larger bit vector
+- `FPNeg`, `BFNeg` I can't find Pseudocode in the ARM SME PDF, but [online](https://support.arm.com/documentation/111108/2026-06/Shared-Pseudocode/shared-functions-float?lang=en) seems to include FP exceptions and FPCR, how detailed do we want to model? And what do we take as our guide?
+- `BFAdd`, `BFMul` also missing from PDF, sometimes BF can use `FPDot` (1 rounding) or chained `BFMul`, `BFAdd` (2 rounding)
+- We can make `Neg` and `FPDot` as the smallest unit of UF or not? Other functions handle exceptions and FPCR before calling UF... (see Zulip Question)
+
 ## IMPORTANT
-- floating point UFs is terrible to test (tedious to constrain each input/output)
 - the tests now are a bit hardcoded assuming SVL=128, else it breaks
 
 #### My UFs DRAM Idea:
@@ -18,7 +29,6 @@
 - loading/storing BYTE,..,QUAD has no alignment check? meaning we can read across cache lines?
 
 ## Remaining Tasks
-- Unit tests for SVE2 instructions
 - Check ARM pseudocode for Floating Point blackbox instructions (similar to checking `ElemP[]` implementation)
     - eg., neg_fn, fmac_fn, fdotadd_fn, etc
 - Optimize `K2` FP instructions using `delta` then `sum` pattern <!-- TODO: optimizations require checking the true ARM pseuducode to see whether we can split the logic into `delta` and `sum` -->
@@ -27,6 +37,11 @@
 - Test edge cases of `XZR`, `WZR` access and write
 - Verify instructions by constructing unit tests, then integration tests (eg., {ZERO, MOVA, SMOPA})
 ## Differences From ARM SME Document
+> `BFDotAdd` should be a high level call that performs some logic before calling `FPDot` and `FPAdd`
+> `FPDotAdd_ZA`, `FPMulAdd_ZA` should do higher level logic (eg., FPCR) before calling `FPMulAdd`, `FPDot`
+> The lower level parts of `FPMulAdd`, `FPDot` can be IEEE function substitutions
+> `BFDotAdd` actually can call `BFMul`, `BFAdd` too which are IEEE function substitutions
+- FPCR (control registers) for floating point instructions and optional floating point exceptions are not modelled
 - Store instructions always write to memory regardless of `active` predicate, it's just that `inactive` elements are written exactly as they were initially in DRAM. ARM says `inactive` elements shouldn't write memory (but in this case the memory was updated to its initial value so does it matter?)
 - Instructions always execute the happy path while `faults` state is incremented when the fault condition is true so state changes still proceed even during fault
     > `LD1` instructions don't check `ConstrainUnpredictableBool` before checking `SPAlignment`
@@ -126,6 +141,9 @@ This document is aimed to provide viewers with an overview of the implementation
 - Observation: if we manually constrain `pstate_sm` or `pstate_za` to false before our SME instruction is supposed to execute, Z3 **cannot auto-generate** conditions to make `SME_ON=true` so, returns `unsat` because instruction can't decode
 - Created a Ctest-inspired `CHECK()` function that performs the necessary setup using a `std::function` argument, then unrolls, and verifies using another `std::function` argument
 
+**[IEEE-Hex-Binary Converter (fp16, ..., fp128)](https://numeral-systems.com/ieee-754-converter/)**:
+- For BFloat16 just use upper bits of FP32 (single precision)
+
 ## Z3 Insights
 - Internal States can only change between steps if explicitly set in `instr.Update`
 - Input States **always** changes between steps
@@ -153,12 +171,44 @@ This document is aimed to provide viewers with an overview of the implementation
     cstr_all_tracked_and_zero(s, u, ctx, t, sme); // enforces the constraint and zeroes the rest
     ```
 
-## Optimizing Load Store Operations on ZA
-- Functions like `CombineTileWith*Vector()` follow the pattern:
-    1. First, read all the required bytes from old memory
-    2. Then, process all of the data inside register space
-    3. Finally, accumulatively-store the updated data into the state
-- Otherwise, initial naive `read, modify, and accumulate-store` per iteration is too complex for Z3 to solve in a reasonable amount of time because subsequent reads need to consider whether they are reading a previously stored value, causing deeply nested internal `Ite()` branching
+## Z3 Floating Point Arithmetic
+[Z3 API Documentation](https://z3prover.github.io/api/html/classz3_1_1expr.html#aa460b1ef4dde33c6ff10fbae306dc6b8)
+[Z3 Source Definitions](https://z3prover.github.io/api/html/z3_09_09_8h_source.html#l04685)
+
+**FPA Sorts (FP16, FP32, BFloat16):**
+- `fpa_sort(ebits, sbits)` takes number of exponent bits and significand bits to construct floating point sort
+    - The number of bits is counted mathematically, meaning that `sbits=24` or FP32 (includes implied leading  bit)
+     ```
+     1 bit      8 bits         23 bits
+    +-------+-----------+------------------+
+    | sign  | exponent  | fraction (stored)| # 23 bits are stored in significand, but mathematically is 24 bits
+    +-------+-----------+------------------+
+    ```
+    - Z3's header defines `fpa_sort<16/32/64>` for FP16/32/64 sorts but it does not include BFloat16
+- BFloat16 negation converts `ilang::BV(16)` to `BFloat16_Sort = fpa_sort(8, 8)` then negates natively
+- BFloat16 widening to FP32 pads additional 16 zeroes to BF16's LSB side, since FP32's upper 16 bits is BFloat16
+
+**Z3 FPA Functions:**
+- All FP operations will perform normalization and rounding when needed, therefore require `rounding_mode`
+- `z3::fpa_to_fpa(input_fpa, new_fpa_sort)` converts any `input_fpa` to `new_fpa_sort`
+- `input_fpa.mk_to_ieee_bv()` dumps the bit vector of this `input_fpa`
+- `input_bv.mk_from_ieee_bv(fpa_sort)` interprets the bit vector as an `fpa_sort`
+- `ctx.fpa_rounding_mode()` gets the rounding mode of target `z3::context`
+- `ctx.set_rounding_mode(z3::RNE)` sets rounding mode to Round Nearest Even (there are other options too)
+- `z3::fma(fa, fb, fc, rounding_mode)` computes `fa*fb + fc` using the `rounding_mode` (pass in `ctx.fpa_rounding_mode`)
+
+**Replacing Uninterpreted Functions in `tr` (constraints) Generated by `ilang::UnrollPathConn`:**
+- ARM SME model contains placeholder UFs (uninterpreted functions) for Floating Point operations
+- The constraints, `tr`, produced by `ilang::UnrollPathConn()` is a tree formed by `And()`-ing constraints together, where each application node (eg., UFs) contain children which are their own function arguments
+- By recursively traversing starting at the root, `substitute_funs_manual` replaces all Floating Point UF nodes with a concrete body, producing a modified version of `tr` free from placeholder UFs that goes into the solving stage
+- The implementation uses Memoization to avoid exponential time complexity, taking into account that Z3 refers to structurally-identical sub-trees as one thing; this unique identifier is used a key to an `std::unordered_map` cache
+- Steps to perform a substitution for a single application node:
+    1. Build a template body `B` that contains placeholder `hole[i]` leaves, which will be filled later on
+        - Holes are created with `Z3_mk_bound(ctx, idx, SORT)` where a designated `idx` *label* is specified
+    2. Gather the actual non-placeholder arguments of the UF into a `z3::expr_vector` called `args_vec`
+    3. Call `B.substitute(args_vec)` to fill each `hole[i]` with corresponding `f.args(i)`, producing new `z3::expr`
+        - `B.substitute(...)` maps each **positional-indexed** `f.args(i)` to the **label-indexed** `hole[i]`
+    4. This new `z3::expr` is the new replaced node, doing this recurisvely replaces an entire sub-tree in `tr`
 
 # Z3 Timeout Cases and Solutions ( + Confusions marked with TODO:)
 Z3 timed out during `UnrollPathConn` in some cases, below lists the bottlenecks and patterns to address each

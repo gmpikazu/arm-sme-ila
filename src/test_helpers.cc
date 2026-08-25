@@ -2,6 +2,10 @@
 #include <iostream>
 #include <iomanip>
 #include <chrono>
+#include <sys/types.h>
+#include <unordered_map>
+#include <utility>
+#include <z3++.h>
 #include "../include/test_helpers.h"
 #include "../include/arm.h"
 #include "ilang/ilang++.h"
@@ -9,6 +13,210 @@
 namespace arm {
 
 std::vector<TestResult> g_test_results;
+
+using SubstituteList =  std::vector<std::pair<std::string, z3::expr>>; // internal only, not in header
+
+// internal manual AST traversal to replace all UFs in bottom-up manner
+static z3::expr _recursive_substitute(const z3::expr& ast_node, const SubstituteList& sub_list, std::unordered_map<Z3_ast, z3::expr>& cache) {
+    // check cache first
+    Z3_ast key = (Z3_ast)ast_node;
+    auto it = cache.find(key);
+    if (it != cache.end()) { return it->second; } // quick base case
+
+    z3::context& ctx = ast_node.ctx(); // must reference
+    z3::expr result = ast_node; // initially the original node
+
+    if (ast_node.is_app()) {
+        z3::func_decl decl = ast_node.decl();
+        auto num_args = ast_node.num_args();
+
+        // replace all UFs recurisvely in all the arguments
+        std::vector<z3::expr> new_args;
+        new_args.reserve(num_args);
+        bool args_changed = false;
+        for (auto i = 0; i < num_args; i++) {
+            auto arg = ast_node.arg(i); // must is_app to call .arg()
+            auto new_arg = _recursive_substitute(arg, sub_list, cache);
+            new_args.push_back(new_arg);
+            if (new_arg.id() != arg.id()) { args_changed = true; }
+        }
+
+        // replace current node itself too if UF
+        bool match = false; // check that name matches in sub_list
+        for (const auto& [target_name, template_body] : sub_list) {
+            if (target_name == decl.name().str()) { 
+                match = true; 
+                z3::expr_vector sub_args(ctx);
+                for (const auto& arg : new_args) { sub_args.push_back(arg); }
+                auto body_copy = template_body;
+                // fill placeholder template with concrete args
+                result = body_copy.substitute(sub_args);
+                break; 
+            }
+        }
+
+        // a function was not our target but arguments changed, must rebuild pointers
+        if (!match && args_changed) {
+            result = decl(new_args.size(), new_args.data()); // operator() overload
+            // rewires the child pointers to the new arguments instead of old ones containing UFs
+        }
+    } // else not an application, hence leaf
+
+    cache.emplace(key, result); // memoize in place, no default constructor present
+    return result; // three return cases: filled body, original, rebuilt node
+}
+
+// NOTE: tr is an AST, this wrapper calls a recursive traversal over this tree and uses a cache memo
+static z3::expr substitute_funs(const z3::expr& ast_node, const SubstituteList& sub_list) {
+    std::unordered_map<Z3_ast, z3::expr> cache; // memo, passed by reference
+    // return substitute_funs_manual(ast_node, sub_list, cache);
+    return _recursive_substitute(ast_node, sub_list, cache);
+}
+
+// use this helper to not forget syntax
+static inline z3::expr mk_bound_var(z3::context& ctx, unsigned idx, z3::sort const& s) {
+    return z3::expr(ctx, Z3_mk_bound(ctx, idx, s));
+}
+
+// NOTE: must call this during CHECK() to replace UFs with IEEE Z3 Floating Point Theory
+// TODO: these ones not sure single rounding or double rounding, it depends on FPCR
+// need to find more granular function call to make into UF
+// fpdotadd32to32(acc,a0,b0,a1,b1) -> acc + a0*b0 + a1*b1 (fp64 should be single round)
+// fpdotadd16to32(acc,a0,b0,a1,b1) -> same, widening fp16->fp64 (single round or double)
+// bfdotadd16to32(acc,a0,b0,a1,b1) -> same, widening bf16->fp32->fp64 (single round or double)
+z3::expr substitute_fp_ufs(const z3::expr& ast_root, ilang::IlaZ3Unroller& u, ArmSme& sme, z3::context& ctx) {
+    // default Round Nearest Even
+    ctx.set_rounding_mode(z3::RNE);
+    z3::expr rm = ctx.fpa_rounding_mode();
+    // bit vector sort
+    z3::sort bv16 = ctx.bv_sort(16);
+    z3::sort bv32 = ctx.bv_sort(32);
+    z3::sort bv64 = ctx.bv_sort(64);
+    // floating point sort
+    z3::sort fp16 = ctx.fpa_sort<16>();
+    z3::sort fp32 = ctx.fpa_sort<32>();
+    z3::sort fp64 = ctx.fpa_sort<64>();
+
+    // UF names must match the strings passed to FuncRef constructor in arm.cc.
+    SubstituteList sub_list;
+
+    // bfneg16
+    // NOTE: can just flip sign bit
+    {
+        z3::expr var0 = mk_bound_var(ctx, 0, bv16);
+        z3::expr body = var0 ^ ctx.bv_val(0x8000, 16);
+        sub_list.push_back({sme.bfneg16.name(), body});
+    }
+    // fpneg16
+    {
+        z3::expr var0 = mk_bound_var(ctx, 0, bv16);
+        z3::expr body = (-var0.mk_from_ieee_bv(fp16)).mk_to_ieee_bv();
+        sub_list.push_back({sme.fpneg16.name(), body});
+    }
+    // fpneg32
+    {
+        z3::expr var0 = mk_bound_var(ctx, 0, bv32);
+        z3::expr body = (-var0.mk_from_ieee_bv(fp32)).mk_to_ieee_bv();
+        sub_list.push_back({sme.fpneg32.name(), body});
+    }
+    // fpneg64
+    {
+        z3::expr var0 = mk_bound_var(ctx, 0, bv64);
+        z3::expr body = (-var0.mk_from_ieee_bv(fp64)).mk_to_ieee_bv();
+        sub_list.push_back({sme.fpneg64.name(), body});
+    }
+    // fpmac32(acc, a, b) = acc + a * b (FMA, one rounding)
+    {
+        z3::expr var_acc = mk_bound_var(ctx, 0, bv32);
+        z3::expr var_a   = mk_bound_var(ctx, 1, bv32);
+        z3::expr var_b   = mk_bound_var(ctx, 2, bv32);
+        z3::expr body = z3::fma(var_a.mk_from_ieee_bv(fp32),
+                                var_b.mk_from_ieee_bv(fp32),
+                                var_acc.mk_from_ieee_bv(fp32),
+                                rm).mk_to_ieee_bv();
+        sub_list.push_back({sme.fpmac32.name(), body});
+    }
+    // fpmac64(acc, a, b) = acc + a * b (FMA, one rounding)
+    {
+        z3::expr var_acc = mk_bound_var(ctx, 0, bv64);
+        z3::expr var_a   = mk_bound_var(ctx, 1, bv64);
+        z3::expr var_b   = mk_bound_var(ctx, 2, bv64);
+        z3::expr body = z3::fma(var_a.mk_from_ieee_bv(fp64),
+                                var_b.mk_from_ieee_bv(fp64),
+                                var_acc.mk_from_ieee_bv(fp64),
+                                rm).mk_to_ieee_bv();
+        sub_list.push_back({sme.fpmac64.name(), body});
+    }
+    // fpdotadd32to32(acc, a0, a1, b0, b1) = acc + a0 * b0 + a1 * b1
+    {
+        z3::expr var_acc = mk_bound_var(ctx, 0, bv32);
+        z3::expr var_a0  = mk_bound_var(ctx, 1, bv32);
+        z3::expr var_a1  = mk_bound_var(ctx, 2, bv32);
+        z3::expr var_b0  = mk_bound_var(ctx, 3, bv32);
+        z3::expr var_b1  = mk_bound_var(ctx, 4, bv32);
+
+        // ASK: how to do single rounding? widen all to fp64, multiply, sum, round once to fp32?
+        z3::expr acc_fp64 = z3::fpa_to_fpa(var_acc.mk_from_ieee_bv(fp32), fp64);
+        z3::expr a0_fp64  = z3::fpa_to_fpa(var_a0 .mk_from_ieee_bv(fp32), fp64);
+        z3::expr a1_fp64  = z3::fpa_to_fpa(var_a1 .mk_from_ieee_bv(fp32), fp64);
+        z3::expr b0_fp64  = z3::fpa_to_fpa(var_b0 .mk_from_ieee_bv(fp32), fp64);
+        z3::expr b1_fp64  = z3::fpa_to_fpa(var_b1 .mk_from_ieee_bv(fp32), fp64);
+
+        z3::expr sum_fp64 = acc_fp64 + (a0_fp64 * b0_fp64) + (a1_fp64 * b1_fp64);
+        z3::expr body = z3::fpa_to_fpa(sum_fp64, fp32).mk_to_ieee_bv();
+        sub_list.push_back({sme.fpdotadd32to32.name(), body});
+    }
+    // fpdotadd16to32(acc, a0, a1, b0, b1) = acc + a0 * b0 + a1 * b1
+    {
+        z3::expr var_acc = mk_bound_var(ctx, 0, bv32);
+        z3::expr var_a0  = mk_bound_var(ctx, 1, bv16);
+        z3::expr var_a1  = mk_bound_var(ctx, 2, bv16);
+        z3::expr var_b0  = mk_bound_var(ctx, 3, bv16);
+        z3::expr var_b1  = mk_bound_var(ctx, 4, bv16);
+
+        // ASK: how to do single rounding? widen all to fp64, multiply, sum, round once to fp32?
+        z3::expr acc_fp64 = z3::fpa_to_fpa(var_acc.mk_from_ieee_bv(fp32), fp64);
+        z3::expr a0_fp64  = z3::fpa_to_fpa(var_a0 .mk_from_ieee_bv(fp16), fp64);
+        z3::expr a1_fp64  = z3::fpa_to_fpa(var_a1 .mk_from_ieee_bv(fp16), fp64);
+        z3::expr b0_fp64  = z3::fpa_to_fpa(var_b0 .mk_from_ieee_bv(fp16), fp64);
+        z3::expr b1_fp64  = z3::fpa_to_fpa(var_b1 .mk_from_ieee_bv(fp16), fp64);
+
+        z3::expr sum_fp64 = acc_fp64 + (a0_fp64 * b0_fp64) + (a1_fp64 * b1_fp64);
+        z3::expr body = z3::fpa_to_fpa(sum_fp64, fp32).mk_to_ieee_bv();
+        sub_list.push_back({sme.fpdotadd16to32.name(), body});
+    }
+    // bfdotadd16to32(acc, a0, a1, b0, b1) = acc + a0 * b0 + a1 * b1
+    {
+        z3::expr var_acc = mk_bound_var(ctx, 0, bv32);
+        z3::expr var_a0  = mk_bound_var(ctx, 1, bv16);
+        z3::expr var_a1  = mk_bound_var(ctx, 2, bv16);
+        z3::expr var_b0  = mk_bound_var(ctx, 3, bv16);
+        z3::expr var_b1  = mk_bound_var(ctx, 4, bv16);
+
+        // NOTE: a0, a1, b0, b1 are Bfloat16 (upper 16 bits of fp32)
+        // widen bf16 -> fp32 by concatenating 16 zero bits in the low half
+        auto bf16_to_fp64 = [&](const z3::expr& bf16_bv) -> z3::expr {
+            // bf16 IS the upper 16 bits of fp32: high half = bf16, low half = 0
+            z3::expr fp32_val = z3::concat(bf16_bv, ctx.bv_val(0, 16)).mk_from_ieee_bv(fp32);
+            return z3::fpa_to_fpa(fp32_val, fp64);
+        };
+
+        // ASK: how to do single rounding? widen all to fp64, multiply, sum, round once to fp32?
+        z3::expr acc_fp64 = z3::fpa_to_fpa(var_acc.mk_from_ieee_bv(fp32), fp64);
+        z3::expr a0_fp64  = bf16_to_fp64(var_a0);
+        z3::expr a1_fp64  = bf16_to_fp64(var_a1);
+        z3::expr b0_fp64  = bf16_to_fp64(var_b0);
+        z3::expr b1_fp64  = bf16_to_fp64(var_b1);
+
+        z3::expr sum_fp64 = acc_fp64 + (a0_fp64 * b0_fp64) + (a1_fp64 * b1_fp64);
+        z3::expr body = z3::fpa_to_fpa(sum_fp64, fp32).mk_to_ieee_bv();
+        sub_list.push_back({sme.bfdotadd16to32.name(), body});
+    }
+
+    // pass in the root of the Z3 AST, starting the recursion
+    // sub_list is a vector of (name, body) pairs
+    return substitute_funs(ast_root, sub_list);
+}
 
 thread_local int g_current_failures = 0;
 
@@ -293,10 +501,11 @@ void PRINT(const ilang::ExprRef &ila_expr, int step, ilang::IlaZ3Unroller &u, z3
 
 void CHECK(const std::string& test_name, ArmSme& sme, const std::vector<std::string>& instr_names,
            std::function<void(ilang::IlaZ3Unroller&, z3::solver&, z3::context&)> setup_fn,
-           std::function<void(z3::model&, ilang::IlaZ3Unroller&)> verify_fn) {
+           std::function<void(z3::model&, ilang::IlaZ3Unroller&)> verify_fn,
+           SubstituteFn sub_fn) {
     std::cout << "\n\n\n=== Test: " << test_name << " ===" << std::endl;
     bool test_passed = true;
-    
+
     // reset failure count for this test
     g_current_failures = 0;
 
@@ -306,10 +515,15 @@ void CHECK(const std::string& test_name, ArmSme& sme, const std::vector<std::str
         std::cout << instr_names[i] << " --> ";
     }
     std::cout << "done" << std::endl;
+    if (sub_fn != nullptr) {
+        std::cout << "  [SUB] UF substitution: ENABLED (Z3 FPA IEEE-754 semantics)" << std::endl;
+    } else {
+        std::cout << "  [SUB] UF substitution: disabled (uninterpreted)" << std::endl;
+    }
 
     try {
         ilang::Ila m = sme.get();
-        
+
         // find instructions by name
         std::vector<ilang::InstrRef> instrs;
         for (const auto& name : instr_names) {
@@ -325,22 +539,28 @@ void CHECK(const std::string& test_name, ArmSme& sme, const std::vector<std::str
                 throw std::runtime_error("Instruction '" + name + "' not found");
             }
         }
-        
+
         z3::context ctx;
         ilang::IlaZ3Unroller u(ctx);
         z3::solver s(ctx);
-        
+
         using clk = std::chrono::high_resolution_clock;
         auto t0 = clk::now();
 
         // unroll the instruction path FIRST
         auto tr = u.UnrollPathConn(instrs, 0);
-        s.add(tr);
+
+        // optionally replaces UFs with Z3 FPA expressions
         auto t1 = clk::now();
+        if (sub_fn) {
+            tr = sub_fn(tr, u, sme, ctx);
+        }
+        s.add(tr);
+        auto t2 = clk::now();
 
         // call setup lambda to add constraints AFTER unrolling
         setup_fn(u, s, ctx);
-        auto t2 = clk::now();
+        auto t3 = clk::now();
 
         // NOTE: initialize sme.faults to zero before solving
         cstr_step(s, u, ctx, sme.faults, ctx.bv_val(0, sme.faults.bit_width()), 0); // step 0
@@ -352,10 +572,12 @@ void CHECK(const std::string& test_name, ArmSme& sme, const std::vector<std::str
         
         // solve
         auto result = s.check();
-        auto t3 = clk::now();
+        auto t4 = clk::now();
 
         auto ms = [](auto a, auto b){ return (int)std::chrono::duration_cast<std::chrono::milliseconds>(b-a).count(); };
-        std::cout << "  [TIME] unroll=" << ms(t0,t1) << "ms  setup=" << ms(t1,t2) << "ms  solve=" << ms(t2,t3) << "ms" << std::endl;
+        std::cout << "  [TIME] unroll=" << ms(t0,t1);
+        if (sub_fn != nullptr) { std::cout << "ms  substitute=" << ms(t1,t2); }
+        std::cout << "ms  setup=" << ms(t2,t3) << "ms  solve=" << ms(t3,t4) << "ms" << std::endl;
 
         if (result == z3::sat) {
 

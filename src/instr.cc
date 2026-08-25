@@ -178,6 +178,7 @@ namespace arm {
             UpdateSingle64BitGPR(instr, Rd, val);
         }
         { // Widening Floating Point Outer Product and Accumulate or Subtract (K=2)
+            // treats input vectors as a 2D matrix, computes a matrix multiplication
             auto f = [&](std::string name, NumericType opcode, NumericType dest_esize, NumericType src_esize, const ExprRef& tile_idx, bool sub_op, const ExprRef& fpzero, const FuncRef& neg_fn, const FuncRef& dotadd_fn){
                 InstrRef instr = m.NewInstr(name);
                 auto decode = SME_ON & (cmd == opcode);
@@ -186,15 +187,16 @@ namespace arm {
                 auto new_za = FloatCombineTileWithMatricesK2(za, tile_idx, GetVectorRegister(Zn), GetVectorRegister(Zm), GetPredicateRegister(Pn), GetPredicateRegister(Pm), dest_esize, src_esize, sub_op, fpzero, neg_fn, dotadd_fn);
                 instr.SetUpdate(za, new_za);
             };
-            // TODO: bf16 and fp16 treated the same
+            // NOTE: bf16 and fp16 treated the same if FP operations left uninterpreted (must Z3 substitute)
             f("BFMOPA (bf16->fp32)", TEMP_OPCODE, WORD, HALF, constrained(ZAda, WORD), false, bf16_zero, bfneg16, bfdotadd16to32);
             f("BFMOPS (bf16->fp32)", TEMP_OPCODE, WORD, HALF, constrained(ZAda, WORD), true, bf16_zero, bfneg16, bfdotadd16to32);
             f("FMOPA (fp16->fp32)", TEMP_OPCODE, WORD, HALF, constrained(ZAda, WORD), false, fp16_zero, fpneg16, fpdotadd16to32);
             f("FMOPS (fp16->fp32)", TEMP_OPCODE, WORD, HALF, constrained(ZAda, WORD), true, fp16_zero, fpneg16, fpdotadd16to32);
         }
         { // Non-Widening Floating Point Outer Product and Accumulate or Subtract (K=1)
-            // has .S and .D
-            auto f = [&](std::string name, std::string suffix, NumericType opcode, NumericType esize, const ExprRef& tile_idx, bool sub_op, const FuncRef& neg_fn, const FuncRef& fmac_fn){
+            // has fp32 and fp64 support for element sizes WORD and DOUBLE
+            // treats each input vector NOT as a matrix, computes outer product of two vectors
+            auto f = [&](std::string name, NumericType opcode, NumericType esize, const ExprRef& tile_idx, bool sub_op, const FuncRef& neg_fn, const FuncRef& fmac_fn){
                 InstrRef instr = m.NewInstr(name);
                 auto decode = SME_ON & (cmd == opcode);
                 instr.SetDecode(decode);
@@ -202,10 +204,10 @@ namespace arm {
                 auto new_za = FloatCombineTileWithMatricesK1(za, tile_idx, GetVectorRegister(Zn), GetVectorRegister(Zm), GetPredicateRegister(Pn), GetPredicateRegister(Pm), esize, sub_op, neg_fn, fmac_fn);
                 instr.SetUpdate(za, new_za);
             };
-            f("FMOPA (non-widening)", ".S", TEMP_OPCODE, WORD, constrained(ZAda, WORD), false, fpneg32, fpmac32);
-            f("FMOPS (non-widening)", ".S", TEMP_OPCODE, WORD, constrained(ZAda, WORD), true, fpneg32, fpmac32);
-            f("FMOPA (non-widening)", ".D", TEMP_OPCODE, DOUBLE, constrained(ZAda, DOUBLE), false, fpneg64, fpmac64);
-            f("FMOPS (non-widening)", ".D", TEMP_OPCODE, DOUBLE, constrained(ZAda, DOUBLE), true, fpneg64, fpmac64);
+            f("FMOPA (fp32)", TEMP_OPCODE, WORD, constrained(ZAda, WORD), false, fpneg32, fpmac32);
+            f("FMOPS (fp32)", TEMP_OPCODE, WORD, constrained(ZAda, WORD), true, fpneg32, fpmac32);
+            f("FMOPA (fp64)", TEMP_OPCODE, DOUBLE, constrained(ZAda, DOUBLE), false, fpneg64, fpmac64);
+            f("FMOPS (fp64)", TEMP_OPCODE, DOUBLE, constrained(ZAda, DOUBLE), true, fpneg64, fpmac64);
         }
         { // Typed Load & Store (no LDR & STR)
             typedef std::function<void(InstrRef& instr, const ExprRef& tile_idx, const ExprRef& slice_idx, const ExprRef& mask, const ExprRef& base, ExprRef& offset, const NumericType& esize)> LogicFunc; // modifies instr

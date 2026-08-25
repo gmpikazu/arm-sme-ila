@@ -608,11 +608,7 @@ namespace arm {
         return new_mem;
     }
     
-    // ================================================
-    // TODO: below need to use pre-extract predicate bits
-    // BUG: below still reuses the same `sum` which will timeout Z3
-    // ================================================
-    
+    // vectors are seen as matrices, computes a widening matrix multiplication
     ExprRef ArmSme::FloatCombineTileWithMatricesK2(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& pred1, const ExprRef& pred2, const NumericType& dest_element_size_bits, const NumericType& src_element_size_bits, bool sub_instead_of_add, const ExprRef& fpzero, const FuncRef& neg_fn, const FuncRef& dotadd_fn) {
         NumericType dim = Z_REG_WIDTH / dest_element_size_bits;
 
@@ -624,6 +620,8 @@ namespace arm {
         }
         for (size_t row = 0; row < dim; row++){
             auto hor_slice = slices[row];
+            std::vector<ExprRef> new_hor_slice;
+            new_hor_slice.reserve(dim);
             for (size_t col = 0; col < dim; col++){
                 auto prow_0 = (GetPredBitFromLSB(pred1, 2*row+0, src_element_size_bits) != 0);
                 auto prow_1 = (GetPredBitFromLSB(pred1, 2*row+1, src_element_size_bits) != 0);
@@ -636,19 +634,22 @@ namespace arm {
                 auto ecol_0 = Ite(pcol_0, GetElementInVectorFromLSB(vec2, 2*col+0, src_element_size_bits), fpzero);
                 auto ecol_1 = Ite(pcol_1, GetElementInVectorFromLSB(vec2, 2*col+1, src_element_size_bits), fpzero);
 
-                if (sub_instead_of_add){ // ASK: can i remove the Ite() check?
+                if (sub_instead_of_add){
                     // only need erow_0 and erow_1 to be negated in this case
                     erow_0 = Ite(prow_0, neg_fn(erow_0), erow_0);
                     erow_1 = Ite(prow_1, neg_fn(erow_1), erow_1);
                 }
-                // TODO: not sure if predicate logic is right, 'unmodified' is guared by Ite()
+                // NOTE: predicate logic is a bit nuanced here:
+                // if none of the elements that correspond to this cell is active, the cell remains unmodified
+                // if some are active, the inactive elements do not contribute to the final cell value
                 auto any_active = (prow_0 & pcol_0) | (prow_1 & pcol_1);
                 sum = Ite(any_active, dotadd_fn({sum, erow_0, erow_1, ecol_0, ecol_1}), sum);
                 
-                // update hor_slice with new sum
-                hor_slice = SetElementInVectorFromLSB(hor_slice, col, dest_element_size_bits, sum, Z_REG_WIDTH);
-                slices[row] = hor_slice;
+                // construct new_hor_slice with new sum
+                new_hor_slice.push_back(sum);
             }
+            std::reverse(new_hor_slice.begin(), new_hor_slice.end()); // since push back was MSB first, not LSB first
+            slices[row] = Concatenate(new_hor_slice);
         }
         auto new_mem = mem;
         for (size_t row = 0; row < dim; row++){
@@ -659,6 +660,7 @@ namespace arm {
         return new_mem;
     }
 
+    // despite the name, actually computes a vector outer product (vectors NOT seen as matrices)
     ExprRef ArmSme::FloatCombineTileWithMatricesK1(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& pred1, const ExprRef& pred2, const NumericType& element_size_bits, bool sub_instead_of_add, const FuncRef& neg_fn, const FuncRef& fmac_fn) {
         NumericType dim = Z_REG_WIDTH / element_size_bits;
 
@@ -670,6 +672,8 @@ namespace arm {
         }
         for (size_t row = 0; row < dim; row++){
             auto hor_slice = slices[row];
+            std::vector<ExprRef> new_hor_slice;
+            new_hor_slice.reserve(dim);
             for (size_t col = 0; col < dim; col++){
                 auto sum = GetElementInVectorFromLSB(hor_slice, col, element_size_bits);
                 auto op1 = GetElementInVectorFromLSB(vec1, row, element_size_bits);
@@ -679,10 +683,11 @@ namespace arm {
                 auto activated = (GetPredBitFromLSB(pred1, row, element_size_bits) != 0) & (GetPredBitFromLSB(pred2, col, element_size_bits) != 0);
                 sum = Ite(activated, fmac_fn({sum, op1, op2}), sum);
                 
-                // update hor_slice with new sum
-                hor_slice = SetElementInVectorFromLSB(hor_slice, col, element_size_bits, sum, Z_REG_WIDTH);
-                slices[row] = hor_slice;
+                // construct new_hor_slice with new sum
+                new_hor_slice.push_back(sum);
             }
+            std::reverse(new_hor_slice.begin(), new_hor_slice.end()); // since push back was MSB first, not LSB first
+            slices[row] = Concatenate(new_hor_slice);
         }
         auto new_mem = mem;
         for (size_t row = 0; row < dim; row++){
@@ -694,7 +699,6 @@ namespace arm {
     }
 
     // ===== ENDIANNESS MATTERS HERE =====
-    // TODO: add this statement to README
     // NOTE: DRAM read/write helpers will use MSB as lowest starting address
     // loads will return Big Endian, stores will convert Big Endian to respective DRAM endianness
     // WB_svl_dram will contain SVL bits exactly as they were written into DRAM with MSB as lowest address
@@ -760,26 +764,6 @@ namespace arm {
     }
     ExprRef ArmSme::DRAM_GetVectorAsZaEndian(const ExprRef& base_addr, const NumericType& element_size_bits, bool convert_endianness) {
         auto addr = ZExt(base_addr, DRAM_ADDR_WIDTH); // ZExt prevent overflow
-        // if (element_size_bits == BYTE) { // TODO: fast case for BYTE still timeouts
-        //     // OPTIMIZATION (Fix B): build 16-byte vector directly in FINAL byte order;
-        //     // skip the 128-bit DRAM_ENDIAN_to_BE call entirely.  Old code produced a
-        //     // 16-deep Concat chain, then fed it through _SwapBytesInVector which did
-        //     // another 16 Extract + 15 Concat — doubled the tree.
-        //     std::vector<ExprRef> bytes;
-        //     bytes.reserve(SVL_B);
-        //     if (!convert_endianness) {
-        //         // same endian: lowest DRAM address → MSB of result  (first in Concatenate)
-        //         for (size_t i = 0; i < SVL_B; ++i)
-        //             bytes.push_back(DRAM_GetByteNoEndian(addr + BvConst(i, DRAM_ADDR_WIDTH)));
-        //     } else {
-        //         // opposite endian (byte swap): lowest DRAM address → LSB of result  (last in Concatenate)
-        //         // so iterate HIGH address → LOW address and push in that order.
-        //         for (int i = SVL_B - 1; i >= 0; --i)
-        //             bytes.push_back(DRAM_GetByteNoEndian(addr + BvConst(i, DRAM_ADDR_WIDTH)));
-        //     }
-        //     return Concatenate(bytes);
-        // }
-        // // else use generic loop
         NumericType byte_esize = element_size_bits / BYTE;
         NumericType elements = SVL / element_size_bits;
         std::vector<ExprRef> elems;

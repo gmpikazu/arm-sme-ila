@@ -272,14 +272,13 @@ class ArmSme {
     FuncRef fpneg16; // negation (FP16 -> FP16)
     FuncRef bfneg16; // negation (BFloat -> BFloat)
     
-    // TODO: current implementation Ignores FPCR settings passed into DOTADD
     // Fused Multiply and Accumulate (with no intermediate rounding!)
+    // TODO: current implementation Ignores FPCR settings and FP exceptions
     FuncRef fpmac64; // FP64 + FP64 * FP64 -> FP64
     FuncRef fpmac32; // FP32 + FP32 * FP32 -> FP32
     
-    // TODO: current implementation Ignores FPCR settings passed into DOTADD
     // Fused Dot Product and Accumulate (with no intermediate rounding!)
-    // usage: DOTADD(old, {a0, b0, a1, b1}) = old + a0 * b0 + a1 * b1
+    // TODO: current implementation Ignores FPCR settings and FP exceptions
     FuncRef fpdotadd32to32; // (FP32's @ FP32's) -> FP32
     FuncRef fpdotadd16to32; // (FP16's @ FP16's) -widened--> FP32
     FuncRef bfdotadd16to32; // (BFloat's @ BFloat's) -widened--> FP32

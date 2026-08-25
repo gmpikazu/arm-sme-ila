@@ -11,6 +11,10 @@ namespace arm {
 
 class ArmSme; // forward declaration
 
+// NOTE: callback lambda must be called in CHECK() function to replace UFs with IEEE Z3 Floating Point Theory
+using SubstituteFn = std::function<z3::expr(const z3::expr&, ilang::IlaZ3Unroller&, ArmSme&, z3::context&)>;
+z3::expr substitute_fp_ufs(const z3::expr& tr, ilang::IlaZ3Unroller& u, ArmSme& sme, z3::context& ctx);
+
 struct TestResult {
     std::string test_name;
     bool passed;
@@ -113,15 +117,17 @@ void PRINT(const ilang::ExprRef &ila_expr, int step, ilang::IlaZ3Unroller &u, z3
 
 // CHECK function
 // @brief handles instruction lookup by name, unroll, timeout, solving, error
-// @param[in] sme: reference to ArmSme instance 
-// @param[in] instr_names: list of instruction names to unroll (in order) 
-// @param[in] setup_fn: lambda that adds constraints (called AFTER unrolling) 
+// @param[in] sme: reference to ArmSme instance
+// @param[in] instr_names: list of instruction names to unroll (in order)
+// @param[in] setup_fn: lambda that adds constraints (called AFTER unrolling)
 // @param[in] verify_fn: lambda that verifies results (called AFTER solving if SAT)
+// @param[in] sub_fn: optional substitution applied to the unrolled transition relation 
 void CHECK(
     const std::string &test_name, ArmSme &sme,
     const std::vector<std::string> &instr_names,
     std::function<void(ilang::IlaZ3Unroller &, z3::solver &, z3::context &)> setup_fn,
-    std::function<void(z3::model &, ilang::IlaZ3Unroller &)> verify_fn);
+    std::function<void(z3::model &, ilang::IlaZ3Unroller &)> verify_fn,
+    SubstituteFn sub_fn = nullptr); // defaults to null
 
 // Ctest-inspired summary of all tests
 void print_test_summary();
