@@ -6,8 +6,10 @@ using namespace arm;
 
 void test_revd(ArmSme& sme_LargeSVL) {
     #define sme sme_LargeSVL
-    CHECK("REVD.Q swaps 64-bit halves of each QUAD element in 256-bit SVL vector", sme, {"REVD.Q"},
+    CHECK("REVD.Q swaps 64-bit halves QUAD element vector then MOVA_V2T.Q updates ZA9V.Q[1]", sme, {"REVD.Q", "MOVA_V2T.Q"},
         [&](IlaZ3Unroller& u, z3::solver& s, z3::context& ctx) {
+            // step 0
+            InitZaToZero(s, u, ctx, sme, 0);
             cstr_step_bv(s, u, ctx, sme.Zd, 3ULL, sme.Zd.bit_width()); // Zd = 3
             cstr_step(s, u, ctx, sme.z_regs[3], ctx.bv_val(-1, sme.Z_REG_WIDTH)); // repeated F initially
             cstr_step_bv(s, u, ctx, sme.Pg, 5ULL, sme.Pg.bit_width());
@@ -17,14 +19,32 @@ void test_revd(ArmSme& sme_LargeSVL) {
                 0x0011223344556677, 0x8899AABBCCDDEEFF,
                 0x0001020304050607, 0x08090A0B0C0D0E0F
             }));
+
+            // step 1
+            cstr_step_bv(s, u, ctx, sme.ZAd, 9ULL, sme.ZAd.bit_width(), 1); // ZA tile 9
+            cstr_step_bool(s, u, ctx, sme.HV, true, 1); // vertical
+            cstr_step_bv(s, u, ctx, sme.Rs, 3ULL, sme.Rs.bit_width(), 1); // W[3]
+            cstr_step_bv(s, u, ctx, sme.Get32BitGPR(3), 1ULL, 32, 1); // slice 1
+            // no need to constrain Imm, since it is fixed as BvConst(0, 1)
+            cstr_step_bv(s, u, ctx, sme.Pg, 2ULL, sme.Pg.bit_width(), 1); // P[2]
+            cstr_step(s, u, ctx, sme.p_regs[2], ctx.bv_val(-1, sme.P_REG_WIDTH), 1); // all ones
+            cstr_step_bv(s, u, ctx, sme.Zn, 3ULL, sme.Zn.bit_width(), 1); // Z[3] which was the Zd in step 0
         },
         [&](z3::model& mdl, IlaZ3Unroller& u) {
+            // step 1
+            std::cout << " dest is updated by source\n";
             auto dest = sme.z_regs[3];
             PRINT(sme.z_regs[7], 0, u, mdl, "source @ 0");
             PRINT(dest, 0, u, mdl, "dest @ 0");
             PRINT(dest, 1, u, mdl, "dest @ 1");
-            auto strexpr = TO_STR(dest, 1, u, mdl);
-            EXPECT_TRUE(strexpr == "#x8899aabbccddeeff001122334455667708090a0b0c0d0e0f0001020304050607");
+            EXPECT_TRUE(TO_STR(dest, 1, u, mdl) == "#x8899aabbccddeeff001122334455667708090a0b0c0d0e0f0001020304050607");
+
+            // step 2
+            std::cout << " ZA is updated at step 2\n";
+            PrintZa(mdl, u, sme, 2);
+            auto slice = sme.GetVerticalSlice(sme.za, 9, 1, QUAD);
+            PRINT(slice, 2, u, mdl, "ZA9V.Q[1] @ 2");
+            EXPECT_TRUE(TO_STR(slice, 2, u, mdl) == "#x8899aabbccddeeff001122334455667708090a0b0c0d0e0f0001020304050607");
         }
     );
     #undef sme
