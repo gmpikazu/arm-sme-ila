@@ -1,11 +1,14 @@
 #pragma once
 
 // NOTE: activates MemState DRAM instead of UF for reading
-#define USE_DRAM_MEMSTATE true
-#define BIG_DRAM_ADDR_WIDTH 128 // very large, to see if MemState will break or not
+#define USE_DRAM_MEMSTATE true // true means use DRAM MemState, DRAM_UF is ignored
+#define BIG_DRAM_ADDR_WIDTH 128 // very large, to see if MemState will timeout or not
 
-// TODO: need to change all usage sites
-#define TEMP_DECODE BoolConst(true)
-#define TEMP_OPCODE 0x01 // some random number, used by ALL instructions
-#define TEMP_BIT_WIDTH 128
-#define TEMP_LARGEST_ADDR_WIDTH 256
+#define FAULTS_ADDR_WIDTH 8 // big enough to prevent fault count overflow, adjust as needed
+
+/* NOTE: TEMP_OPCODE only works with UnrollPathConn 
+ * since exactly one instruction is unrolled at each step
+ * UnrollMonoConn needs one opcode per instruction
+ */
+#define TEMP_OPCODE 0xBAD // some random number, used by ALL instructions
+#define CMD_ADDR_WIDTH 32 // must be big enough to fit the opcodes

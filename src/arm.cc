@@ -36,7 +36,7 @@ namespace arm {
         WZR(BvConst(0, 32)),
 
         // NOTE: input states
-        cmd(m.NewBvInput("cmd", TEMP_LARGEST_ADDR_WIDTH)), // TODO: TBC
+        cmd(m.NewBvInput("cmd", CMD_ADDR_WIDTH)),
 
         ZAda(m.NewBvInput("ZAda", LOG2_SVL_B)),
         ZAn(m.NewBvInput("ZAn", LOG2_SVL_B)),
@@ -44,9 +44,9 @@ namespace arm {
         ZAt(m.NewBvInput("ZAt", LOG2_SVL_B)),
         HV(m.NewBoolInput("HV")),
 
-        // TODO: TBC: check each bit width
-        // some should only be limited to W12-W15
-        // but that depends on the instruction
+        // NOTE: user is responsible for passing valid W register names
+        // ARM says can only select W12-W15 due to prepending '011' to 2 bit Rv
+        // the implemented registers below DO NOT enforce this constraint
         Rs(m.NewBvInput("Rs", GPR_ADDR_WIDTH)),
         Rv(m.NewBvInput("Rv", GPR_ADDR_WIDTH)),
         Rn(m.NewBvInput("Rn", GPR_ADDR_WIDTH)),
@@ -69,16 +69,15 @@ namespace arm {
         Zm(m.NewBvInput("Zm", Z_ADDR_WIDTH)),
         
         // NOTE: Sort Refs
-        // ASK: bfloat and fp16 should have different format
         // WARN: treated the same in UF
         bf16(SortRef::BV(16)),
         fp64(SortRef::BV(64)),
         fp32(SortRef::BV(32)),
         fp16(SortRef::BV(16)),
 
-        // ASK: bit representation of zero for bfloat
+        // fp16_zero and bf16_zero are same, just convenient names
         fp32_zero(BvConst(0, 32)),
-        fp16_zero(BvConst(0, 16)), // ASK: same value as bf16_zero though
+        fp16_zero(BvConst(0, 16)),
         bf16_zero(BvConst(0, 16)),
         
         // NOTE: Uninterpreted Functions
@@ -117,6 +116,7 @@ namespace arm {
         AddInstructions();
     }
 
+    // zeroes out ZA 
     void ArmSme::ResetSMEState(InstrRef& instr) {
         auto new_za = za;
         for (size_t i = 0; i < ZA_BYTE_SIZE; i++) {
@@ -125,6 +125,7 @@ namespace arm {
         instr.SetUpdate(za, new_za);
     }
 
+    // zeroes out vector and predicate registers
     void ArmSme::ResetSVEState(InstrRef& instr) {
         for (size_t i = 0; i < Z_REG_COUNT; i++) {
             instr.SetUpdate(z_regs[i], BvConst(0, Z_REG_WIDTH));
@@ -458,9 +459,9 @@ namespace arm {
         // if !use_sp && x_idx == 31: XZR naturally disregarded
     }
     
-    // TODO: check that all Ws+imm wants Unsigned Extension, find reasonable TEMP_LARGEST_ADDR_WIDTH
     ExprRef ArmSme::BaseRegPlusImm(const ExprRef& base_reg_value, const ExprRef& imm) {
-        return ZExt(base_reg_value, TEMP_LARGEST_ADDR_WIDTH) + ZExt(imm, TEMP_LARGEST_ADDR_WIDTH);
+        NumericType max_bit_width = std::max(base_reg_value.bit_width(), imm.bit_width());
+        return ZExt(base_reg_value, max_bit_width) + ZExt(imm, max_bit_width);
     }
     
     // NOTE: safe for source and dest to alias, since result is a newly instantiated std::vector<ExprRef>

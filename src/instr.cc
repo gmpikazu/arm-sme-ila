@@ -1,5 +1,6 @@
 #include "arm.h"
 #include "config.h"
+#include <ilang/ilang++.h>
 #include <algorithm>
 #include <cmath>
 
@@ -10,38 +11,40 @@ namespace arm {
     // NOTE: read Section B1.1.1 Process State for System Register Behavior
     // changing pstate_sm always resets SVE state
     // SME state (ZA storage) only resets when pstate_za is flipped to 1 from initially 0
-    // TODO: no implementation of MSR yet, so this is just SMSTART, SMSTOP
-    // also some instructions require only either SM or ZA pstate to be present
-        { // SMSTART
-            InstrRef instr = m.NewInstr("SMSTART");
-            auto decode = TEMP_DECODE;
-            instr.SetDecode(decode);
-            instr.SetUpdate(pstate_sm, BoolConst(true));
-            instr.SetUpdate(pstate_za, BoolConst(true));
-            // TODO: zero out vector and predicate registers
-            ResetSVEState(instr); 
-            ResetSMEState(instr);
-        }
-        { // SMSTOP
-            InstrRef instr = m.NewInstr("SMSTOP");
-            auto decode = TEMP_DECODE;
-            instr.SetDecode(decode);
-            instr.SetUpdate(pstate_sm, BoolConst(false));
-            instr.SetUpdate(pstate_za, BoolConst(false));
-            // TODO: zero out vector and predicate registers
-            // TODO: changing pstate_ZA may zero out the ZA storage (read B1.1.1.2 PSTATE.ZA)
-            ResetSVEState(instr); // SME state (ZA storage) unchanged
-        }
+    // TODO: no implementation of MSR, only aliases SMSTART, SMSTOP
+        { // NOTE: MSR alias only check opcode
+            { // SMSTART
+                InstrRef instr = m.NewInstr("SMSTART");
+                auto decode = (cmd == TEMP_OPCODE);
+                instr.SetDecode(decode);
+                instr.SetUpdate(pstate_sm, BoolConst(true));
+                instr.SetUpdate(pstate_za, BoolConst(true));
+                ResetSVEState(instr); 
+                ResetSMEState(instr);
+            }
+            { // SMSTOP
+                InstrRef instr = m.NewInstr("SMSTOP");
+                auto decode = (cmd == TEMP_OPCODE);
+                instr.SetDecode(decode);
+                instr.SetUpdate(pstate_sm, BoolConst(false));
+                instr.SetUpdate(pstate_za, BoolConst(false));
+                ResetSVEState(instr);
+                // NOTE: SME state (ZA storage) unchanged
+            }
+        } // MSR end
         
-        // NOTE: instructions below requires Streaming SVE mode
-        // TODO: some only need SM or ZA
-        ExprRef SME_ON = pstate_sm & pstate_za;
+        // NOTE: instructions below requires Streaming SVE Mode or ZA Active or Both
+        ExprRef Is_SME_Enabled = BoolConst(true); // of course enabled, else ILA is pointless
+        ExprRef Is_SVE_Enabled = BoolConst(true); // assume enabled
+        ExprRef Is_Streaming_SVE_Mode = pstate_sm;
+        ExprRef Is_ZA_Enabled = pstate_za;
+        ExprRef Is_Streaming_And_ZA = Is_Streaming_SVE_Mode & Is_ZA_Enabled;
         #define constrained(tile_idx, esize) ToConstrainedTileIndex(tile_idx, esize)
         
         { // MOVA (tile to vector)
             auto f = [&](NumericType opcode, NumericType esize, std::string suffix, ExprRef tile_idx, ExprRef imm){
                 InstrRef instr = m.NewInstr("MOVA_T2V"+suffix);
-                auto decode = SME_ON & (cmd == opcode);
+                auto decode = Is_SME_Enabled & Is_Streaming_And_ZA & (cmd == opcode);
                 instr.SetDecode(decode);
 
                 auto slice_idx = BaseRegPlusImm(Get32BitGPR(Rs), imm);
@@ -59,7 +62,7 @@ namespace arm {
         { // MOVA (vector to tile)
             auto f = [&](NumericType opcode, NumericType esize, std::string suffix, ExprRef tile_idx, ExprRef imm){
                 InstrRef instr = m.NewInstr("MOVA_V2T"+suffix);
-                auto decode = SME_ON & (cmd == opcode);
+                auto decode = Is_SME_Enabled & Is_Streaming_And_ZA & (cmd == opcode);
                 instr.SetDecode(decode);
                 
                 auto slice_idx = BaseRegPlusImm(Get32BitGPR(Rs), imm);
@@ -76,7 +79,7 @@ namespace arm {
         }
         { // ZERO
             InstrRef instr = m.NewInstr("ZERO");
-            auto decode = SME_ON & TEMP_DECODE;
+            auto decode = Is_SME_Enabled & Is_ZA_Enabled & (cmd == TEMP_OPCODE);
             instr.SetDecode(decode);
 
             // NOTE: instruction only operates on 64-bit tiles (8 tiles total)
@@ -99,7 +102,7 @@ namespace arm {
             auto add_fn = [](ExprRef a, ExprRef b) { return a + b; };
             auto f = [&](NumericType opcode, NumericType esize, std::string suffix, ExprRef tile_idx){
                 InstrRef instr = m.NewInstr("ADDHA"+suffix);
-                auto decode = SME_ON & (cmd == opcode);
+                auto decode = Is_SME_Enabled & Is_Streaming_And_ZA & (cmd == opcode);
                 instr.SetDecode(decode);
                 
                 auto row_pred = GetPredicateRegister(Pn);
@@ -115,7 +118,7 @@ namespace arm {
             auto add_fn = [](ExprRef a, ExprRef b) { return a + b; };
             auto f = [&](NumericType opcode, NumericType esize, std::string suffix, ExprRef tile_idx){
                 InstrRef instr = m.NewInstr("ADDVA"+suffix);
-                auto decode = SME_ON & (cmd == opcode);
+                auto decode = Is_SME_Enabled & Is_Streaming_And_ZA & (cmd == opcode);
                 instr.SetDecode(decode);
                 
                 auto row_pred = GetPredicateRegister(Pn);
@@ -130,7 +133,7 @@ namespace arm {
         { // Integer Outer Product and Accumulate or Subtract
             auto f = [&](std::string name, NumericType opcode, NumericType esize, std::string suffix, ExprRef tile_idx, bool sub_op, bool op1_unsigned, bool op2_unsigned){
                 InstrRef instr = m.NewInstr(name+suffix);
-                auto decode = SME_ON & (cmd == opcode);
+                auto decode = Is_SME_Enabled & Is_Streaming_And_ZA & (cmd == opcode);
                 instr.SetDecode(decode);
 
                 auto new_za = IntegerCombineTileWithMatrices(za, tile_idx, GetVectorRegister(Zn), GetVectorRegister(Zm), GetPredicateRegister(Pn), GetPredicateRegister(Pm), esize, sub_op, op1_unsigned, op2_unsigned);
@@ -158,36 +161,40 @@ namespace arm {
                 f(inst.name, inst.opcode, DOUBLE, " (16b->64b)", constrained(ZAda, DOUBLE), inst.sub_op, inst.op1_unsigned, inst.op2_unsigned);
             }
         }
-        { // ADDSPL
-            InstrRef instr = m.NewInstr("ADDSPL");
-            auto decode = SME_ON & (cmd == TEMP_OPCODE);
-            instr.SetDecode(decode);
-            
-            auto val = BvConst(P_REG_WIDTH / BYTE, 64) * SExt(Imm6, 64) + Get64BitGPR(Rn, true);
-            UpdateSingle64BitGPR(instr, Rd, val, true);
+
+        { // NOTE: no need Streaming SVE Mode or ZA Enabled (just that SME exists, which of course it does)
+            { // ADDSPL
+                InstrRef instr = m.NewInstr("ADDSPL");
+                auto decode = Is_SME_Enabled & (cmd == TEMP_OPCODE);
+                instr.SetDecode(decode);
+                
+                auto val = BvConst(P_REG_WIDTH / BYTE, 64) * SExt(Imm6, 64) + Get64BitGPR(Rn, true);
+                UpdateSingle64BitGPR(instr, Rd, val, true);
+            }
+            { // ADDSVL
+                InstrRef instr = m.NewInstr("ADDSVL");
+                auto decode = Is_SME_Enabled & (cmd == TEMP_OPCODE);
+                instr.SetDecode(decode);
+                
+                auto val = BvConst(Z_REG_WIDTH / BYTE, 64) * SExt(Imm6, 64) + Get64BitGPR(Rn, true);
+                UpdateSingle64BitGPR(instr, Rd, val, true);
+            }
+            { // RDSVL
+                InstrRef instr = m.NewInstr("RDSVL");
+                auto decode = Is_SME_Enabled & (cmd == TEMP_OPCODE);
+                instr.SetDecode(decode);
+                
+                // NOTE: no SP support for this instruction
+                auto val = BvConst(Z_REG_WIDTH / BYTE, 64) * SExt(Imm6, 64);
+                UpdateSingle64BitGPR(instr, Rd, val);
+            }
         }
-        { // ADDSVL
-            InstrRef instr = m.NewInstr("ADDSVL");
-            auto decode = SME_ON & (cmd == TEMP_OPCODE);
-            instr.SetDecode(decode);
-            
-            auto val = BvConst(Z_REG_WIDTH / BYTE, 64) * SExt(Imm6, 64) + Get64BitGPR(Rn, true);
-            UpdateSingle64BitGPR(instr, Rd, val, true);
-        }
-        { // RDSVL
-            InstrRef instr = m.NewInstr("RDSVL");
-            auto decode = SME_ON & (cmd == TEMP_OPCODE);
-            instr.SetDecode(decode);
-            
-            // NOTE: no SP support for this instruction
-            auto val = BvConst(Z_REG_WIDTH / BYTE, 64) * SExt(Imm6, 64);
-            UpdateSingle64BitGPR(instr, Rd, val);
-        }
+
         { // Widening Floating Point Outer Product and Accumulate or Subtract (K=2)
             // treats input vectors as a 2D matrix, computes a matrix multiplication
             auto f = [&](std::string name, NumericType opcode, NumericType dest_esize, NumericType src_esize, const ExprRef& tile_idx, bool sub_op, const ExprRef& fpzero, const FuncRef& neg_fn, const FuncRef& dotadd_fn){
                 InstrRef instr = m.NewInstr(name);
-                auto decode = SME_ON & (cmd == opcode);
+                auto decode = Is_SME_Enabled & Is_Streaming_And_ZA & (cmd == opcode);
                 instr.SetDecode(decode);
                 
                 auto new_za = FloatCombineTileWithMatricesK2(za, tile_idx, GetVectorRegister(Zn), GetVectorRegister(Zm), GetPredicateRegister(Pn), GetPredicateRegister(Pm), dest_esize, src_esize, sub_op, fpzero, neg_fn, dotadd_fn);
@@ -204,7 +211,7 @@ namespace arm {
             // treats each input vector NOT as a matrix, computes outer product of two vectors
             auto f = [&](std::string name, NumericType opcode, NumericType esize, const ExprRef& tile_idx, bool sub_op, const FuncRef& neg_fn, const FuncRef& fmac_fn){
                 InstrRef instr = m.NewInstr(name);
-                auto decode = SME_ON & (cmd == opcode);
+                auto decode = Is_SME_Enabled & Is_Streaming_And_ZA & (cmd == opcode);
                 instr.SetDecode(decode);
                 
                 auto new_za = FloatCombineTileWithMatricesK1(za, tile_idx, GetVectorRegister(Zn), GetVectorRegister(Zm), GetPredicateRegister(Pn), GetPredicateRegister(Pm), esize, sub_op, neg_fn, fmac_fn);
@@ -220,7 +227,7 @@ namespace arm {
 
             auto f = [&](std::string name, NumericType opcode, NumericType esize, const ExprRef& tile_idx, const ExprRef imm, LogicFunc MainLogic){
                 InstrRef instr = m.NewInstr(name);
-                auto decode = SME_ON & (cmd == opcode);
+                auto decode = Is_SME_Enabled & Is_Streaming_And_ZA & (cmd == opcode);
                 instr.SetDecode(decode);
 
                 auto base = Get64BitGPR(Rn, true); // returns SP if (n == 31)
@@ -273,7 +280,7 @@ namespace arm {
 
             auto f = [&](std::string name, NumericType opcode, LogicFunc MainLogic){
                 InstrRef instr = m.NewInstr(name);
-                auto decode = SME_ON & (cmd == opcode);
+                auto decode = Is_SME_Enabled & Is_ZA_Enabled & (cmd == opcode);
                 instr.SetDecode(decode);
 
                 NumericType dim = SVL_B;
@@ -309,109 +316,110 @@ namespace arm {
             f("STR", TEMP_OPCODE, STR_Logic);
         }
 
-        { // PSEL
-            auto f = [&](std::string name, NumericType opcode, NumericType esize, const ExprRef imm){
-                InstrRef instr = m.NewInstr(name);
-                auto decode = SME_ON & (cmd == opcode);
-                instr.SetDecode(decode);
+        { // NOTE: SVE2 instructions just care about SVE existence (assume it is enabled)
+            { // PSEL
+                auto f = [&](std::string name, NumericType opcode, NumericType esize, const ExprRef imm){
+                    InstrRef instr = m.NewInstr(name);
+                    auto decode = Is_SVE_Enabled & (cmd == opcode);
+                    instr.SetDecode(decode);
 
-                auto operand1 = GetPredicateRegister(Pn); // source
-                auto operand2 = GetPredicateRegister(Pm); // mask
+                    auto operand1 = GetPredicateRegister(Pn); // source
+                    auto operand2 = GetPredicateRegister(Pm); // mask
 
-                NumericType elements = SVL / esize; 
-                assert(esize != SVL); // NOTE: no QUAD support in ARM SME, so esize != SVL
-                assert(elements % 2 == 0); // must be even for log2 to be safe
-                auto before_modulo = BaseRegPlusImm(Get32BitGPR(Rv), imm);
-                auto wrapped_index = Extract(before_modulo, std::log2(elements)-1, 0); // lower bits
+                    NumericType elements = SVL / esize; 
+                    assert(esize != SVL); // NOTE: no QUAD support in ARM SME, so esize != SVL
+                    assert(elements % 2 == 0); // must be even for log2 to be safe
+                    auto before_modulo = BaseRegPlusImm(Get32BitGPR(Rv), imm);
+                    auto wrapped_index = Extract(before_modulo, std::log2(elements)-1, 0); // lower bits
 
-                auto is_active = (GetPredBitFromLSB(operand2, wrapped_index, esize) != 0); // nested Ite
-                assert(operand1.bit_width() == P_REG_WIDTH && operand1.bit_width() == operand2.bit_width());
-                auto result = Ite(is_active, operand1, BvConst(0, operand1.bit_width()));
-                UpdateSinglePredicateRegister(instr, Pd, result);
-            };
-            f("PSEL.B", TEMP_OPCODE, BYTE, Imm4);
-            f("PSEL.H", TEMP_OPCODE, HALF, Imm3);
-            f("PSEL.S", TEMP_OPCODE, WORD, Imm2);
-            f("PSEL.D", TEMP_OPCODE, DOUBLE, Imm1);
-            // NOTE: no QUAD support
-        }
-
-        { // REVD.Q
-            InstrRef instr = m.NewInstr("REVD.Q");
-            auto decode = SME_ON & (cmd == TEMP_OPCODE);
-            instr.SetDecode(decode);
-
-            // NOTE: esize, swsize fixed for QUAD elements (.Q) only
-            NumericType esize = 128, swsize = 64;
-            NumericType elements = SVL / esize;
-            auto mask = GetPredicateRegister(Pg);
-            auto operand = GetVectorRegister(Zn);
-            auto old_dest = GetVectorRegister(Zd);
-
-            assert(elements > 0); // SVL greater than esize
-            std::vector<ExprRef> result_elems;
-            result_elems.reserve(elements);
-            assert(esize == swsize * 2); // swsize exactly half, since 0,1 index is used
-            for (size_t i = 0; i < elements; i++) {
-                auto src_elem = GetElementInVectorFromLSB(operand, i, esize);
-                auto high_half = GetElementInVectorFromLSB(src_elem, 1, swsize);
-                auto low_half = GetElementInVectorFromLSB(src_elem, 0, swsize);
-                auto reversed = Concat(low_half, high_half); // swap halves
-                assert(reversed.bit_width() == src_elem.bit_width() && reversed.bit_width() == esize);
-
-                // inactive remains unmodified
-                auto old_dest_elem = GetElementInVectorFromLSB(old_dest, i, esize);
-                auto active = (GetPredBitFromLSB(mask, i, esize) != 0);
-                auto new_elem = Ite(active, reversed, old_dest_elem);
-                result_elems.push_back(new_elem);
+                    auto is_active = (GetPredBitFromLSB(operand2, wrapped_index, esize) != 0); // nested Ite
+                    assert(operand1.bit_width() == P_REG_WIDTH && operand1.bit_width() == operand2.bit_width());
+                    auto result = Ite(is_active, operand1, BvConst(0, operand1.bit_width()));
+                    UpdateSinglePredicateRegister(instr, Pd, result);
+                };
+                f("PSEL.B", TEMP_OPCODE, BYTE, Imm4);
+                f("PSEL.H", TEMP_OPCODE, HALF, Imm3);
+                f("PSEL.S", TEMP_OPCODE, WORD, Imm2);
+                f("PSEL.D", TEMP_OPCODE, DOUBLE, Imm1);
+                // NOTE: no QUAD support
             }
-            std::reverse(result_elems.begin(), result_elems.end());
-            auto result = Concatenate(result_elems);
-            UpdateSingleVectorRegister(instr, Zd, result);
-        }
 
-        { // CLAMP (signed and unsigned)
-            #define Umax(a, b) Ite(Ugt(a, b), a, b)
-            #define Umin(a, b) Ite(Ult(a, b), a, b)
-            #define Smax(a, b) Ite(Sgt(a, b), a, b)
-            #define Smin(a, b) Ite(Slt(a, b), a, b)
-
-            auto f = [&](std::string name, std::string suffix, NumericType opcode, NumericType esize, bool is_signed) {
-                InstrRef instr = m.NewInstr(name+suffix);
-                auto decode = SME_ON & (cmd == opcode);
+            { // REVD.Q
+                InstrRef instr = m.NewInstr("REVD.Q");
+                auto decode = Is_SVE_Enabled & (cmd == TEMP_OPCODE);
                 instr.SetDecode(decode);
 
-                auto min_op = GetVectorRegister(Zn);
-                auto max_op = GetVectorRegister(Zm);
-                auto dest_old = GetVectorRegister(Zd);
-                std::vector<ExprRef> result_elems;
-                result_elems.reserve(dest_old.bit_width());
-
+                // NOTE: esize, swsize fixed for QUAD elements (.Q) only
+                NumericType esize = 128, swsize = 64;
                 NumericType elements = SVL / esize;
+                auto mask = GetPredicateRegister(Pg);
+                auto operand = GetVectorRegister(Zn);
+                auto old_dest = GetVectorRegister(Zd);
+
+                assert(elements > 0); // SVL greater than esize
+                std::vector<ExprRef> result_elems;
+                result_elems.reserve(elements);
+                assert(esize == swsize * 2); // swsize exactly half, since 0,1 index is used
                 for (size_t i = 0; i < elements; i++) {
-                    auto min_elem = GetElementInVectorFromLSB(min_op, i, esize);
-                    auto max_elem = GetElementInVectorFromLSB(max_op, i, esize);
-                    auto elem = GetElementInVectorFromLSB(dest_old, i, esize);
-                    
-                    auto res_elem = is_signed ? Smin(Smax(min_elem, elem), max_elem) : Umin(Umax(elem, min_elem), max_elem);
-                    result_elems.push_back(res_elem);
+                    auto src_elem = GetElementInVectorFromLSB(operand, i, esize);
+                    auto high_half = GetElementInVectorFromLSB(src_elem, 1, swsize);
+                    auto low_half = GetElementInVectorFromLSB(src_elem, 0, swsize);
+                    auto reversed = Concat(low_half, high_half); // swap halves
+                    assert(reversed.bit_width() == src_elem.bit_width() && reversed.bit_width() == esize);
+
+                    // inactive remains unmodified
+                    auto old_dest_elem = GetElementInVectorFromLSB(old_dest, i, esize);
+                    auto active = (GetPredBitFromLSB(mask, i, esize) != 0);
+                    auto new_elem = Ite(active, reversed, old_dest_elem);
+                    result_elems.push_back(new_elem);
                 }
                 std::reverse(result_elems.begin(), result_elems.end());
                 auto result = Concatenate(result_elems);
-                assert(result.bit_width() == Z_REG_WIDTH);
                 UpdateSingleVectorRegister(instr, Zd, result);
-            };
-            f("SCLAMP", ".B", TEMP_OPCODE, BYTE, true);
-            f("SCLAMP", ".H", TEMP_OPCODE, HALF, true);
-            f("SCLAMP", ".S", TEMP_OPCODE, WORD, true);
-            f("SCLAMP", ".D", TEMP_OPCODE, DOUBLE, true);
-            // NOTE: no QUAD support for signed
-            f("UCLAMP", ".B", TEMP_OPCODE, BYTE, false);
-            f("UCLAMP", ".H", TEMP_OPCODE, HALF, false);
-            f("UCLAMP", ".S", TEMP_OPCODE, WORD, false);
-            f("UCLAMP", ".D", TEMP_OPCODE, DOUBLE, false);
-            // NOTE: no QUAD support for unsigned too
-        }
-    }
-    
+            }
+
+            { // CLAMP (signed and unsigned)
+                #define Umax(a, b) Ite(Ugt(a, b), a, b)
+                #define Umin(a, b) Ite(Ult(a, b), a, b)
+                #define Smax(a, b) Ite(Sgt(a, b), a, b)
+                #define Smin(a, b) Ite(Slt(a, b), a, b)
+
+                auto f = [&](std::string name, std::string suffix, NumericType opcode, NumericType esize, bool is_signed) {
+                    InstrRef instr = m.NewInstr(name+suffix);
+                    auto decode = Is_SVE_Enabled & (cmd == opcode);
+                    instr.SetDecode(decode);
+
+                    auto min_op = GetVectorRegister(Zn);
+                    auto max_op = GetVectorRegister(Zm);
+                    auto dest_old = GetVectorRegister(Zd);
+                    std::vector<ExprRef> result_elems;
+                    result_elems.reserve(dest_old.bit_width());
+
+                    NumericType elements = SVL / esize;
+                    for (size_t i = 0; i < elements; i++) {
+                        auto min_elem = GetElementInVectorFromLSB(min_op, i, esize);
+                        auto max_elem = GetElementInVectorFromLSB(max_op, i, esize);
+                        auto elem = GetElementInVectorFromLSB(dest_old, i, esize);
+                        
+                        auto res_elem = is_signed ? Smin(Smax(min_elem, elem), max_elem) : Umin(Umax(elem, min_elem), max_elem);
+                        result_elems.push_back(res_elem);
+                    }
+                    std::reverse(result_elems.begin(), result_elems.end());
+                    auto result = Concatenate(result_elems);
+                    assert(result.bit_width() == Z_REG_WIDTH);
+                    UpdateSingleVectorRegister(instr, Zd, result);
+                };
+                f("SCLAMP", ".B", TEMP_OPCODE, BYTE, true);
+                f("SCLAMP", ".H", TEMP_OPCODE, HALF, true);
+                f("SCLAMP", ".S", TEMP_OPCODE, WORD, true);
+                f("SCLAMP", ".D", TEMP_OPCODE, DOUBLE, true);
+                // NOTE: no QUAD support for signed
+                f("UCLAMP", ".B", TEMP_OPCODE, BYTE, false);
+                f("UCLAMP", ".H", TEMP_OPCODE, HALF, false);
+                f("UCLAMP", ".S", TEMP_OPCODE, WORD, false);
+                f("UCLAMP", ".D", TEMP_OPCODE, DOUBLE, false);
+                // NOTE: no QUAD support for unsigned too
+            }
+        } // SVE2 end
+    } // AddInstructions() end
 }  // namespace arm

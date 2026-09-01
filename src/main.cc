@@ -46,7 +46,6 @@ int main() {
     list_instrs(sme_DramLE);
     
     // instruction unit tests
-    // test_quick(sme_DramLE);
 
     // NOTE: tested and working
     test_pstate(sme_DramLE);

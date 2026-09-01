@@ -16,9 +16,6 @@ namespace arm {
     #define DOUBLE 64
     #define QUAD 128
 
-    constexpr NumericType FAULTS_ADDR_WIDTH = 8; // enough to prevent overflow
-
-
 using namespace ilang;
 
 class ArmSme {

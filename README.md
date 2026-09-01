@@ -25,9 +25,10 @@
 
 ## ILA Differences Against ARM SME Document
 1. System-wide States
+    - Instructions assume SME and SVE extensions are both present since the decode uses `BoolConst(true)`
     - `MSR` instruction skipped, ILA only includes relevant `SMSTART`, `SMSTOP` aliases that control bits used in other instructions (ie., `PSTATE.SM`, `PSTATE.ZA` for SVE Streaming Mode and ZA Tile Storage Activation)
     - A compile-time constant `SVL` is used throughout and a separate `VL` is not defined
-    - Traps and exceptions levels are not modelled in the ILA, instructions **only** check `PSTATE.SM`, `PSTATE.ZA` for SVE Streaming Mode and ZA status (enabled or not), they ignore exceptions levels and other quirks
+    - Traps and exceptions levels are not modelled in the ILA, instructions **only** check `PSTATE.SM`, `PSTATE.ZA` whether SVE Streaming Mode and ZA status are enabled, they ignore exceptions levels and other quirks
     - The only exception modelled is `SP` alignment and `(base + offset)` address alignment in Load/Store instructions
     - Additional features (eg., watchpoints, transactional memory extension) are not present in the ILA
 2. Endianness
