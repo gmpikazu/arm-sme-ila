@@ -45,7 +45,9 @@ class ArmSme {
     const NumericType DRAM_ADDR_WIDTH; // ASK: must be different from fp16, fp32, fp64, else will be treated same as them??
 
   private:
-    void AddInstructions();
+    void AddInstructions(void);
+    void ResetSMEState(InstrRef& instr);
+    void ResetSVEState(InstrRef& instr);
 
     // NOTE: convert tile_idx into constrained range: 0 to num_tiles-1
     ExprRef ToConstrainedTileIndex(const ExprRef& tile_idx, const NumericType& esize);
@@ -118,11 +120,11 @@ class ArmSme {
 
     // @brief Uses GetElementInVectorFromLSB() to extract bit from vector
     // NOTE: pass in BYTE to advance by single bit due to formula actual_idx = idx * (element_size_bits / BYTE)
-    ExprRef GetPredBitFromLSB(const ExprRef& vector, const NumericType& idx, const NumericType& element_size_bits);
-    ExprRef GetPredBitFromLSB(const ExprRef& vector, const ExprRef& idx, const NumericType& element_size_bits);
+    ExprRef GetPredBitFromLSB(const ExprRef& mask, const NumericType& idx, const NumericType& element_size_bits);
+    ExprRef GetPredBitFromLSB(const ExprRef& mask, const ExprRef& idx, const NumericType& element_size_bits);
 
     // @return BoolExpr that is an OR between multiple bits
-    ExprRef IsAnyPredActive(const ExprRef& vector, const NumericType& element_size_bits);
+    ExprRef IsAnyPredActive(const ExprRef& mask, const NumericType& element_size_bits);
 
     // @return New vector where element at idx is replaced with new_element
     ExprRef SetElementInVectorFromLSB(const ExprRef& vector, const NumericType& idx, const NumericType& element_size_bits, const ExprRef& new_element, const NumericType& vector_length_bits); // rightmost element is index 0
@@ -153,7 +155,7 @@ class ArmSme {
     // param[in] is_zero_mode takes: (defaults to merge_mode)
     // - true: source element inactive => destination element is zeroed
     // - false: source element inactive => destination element unmodified
-    ExprRef MaskWithSinglePredicate(const ExprRef& source, const ExprRef& dest, const NumericType& element_size_bits, const NumericType& vector_length_bits, const ExprRef& predicate, bool is_zero_mode=false);
+    ExprRef MaskWithSinglePredicate(const ExprRef& source, const ExprRef& dest, const NumericType& element_size_bits, const NumericType& vector_length_bits, const ExprRef& mask, bool is_zero_mode=false);
 
     ExprRef CombineTileWithHorizontalVector(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, const ExprRef& is_zero_mode, std::function<ExprRef(ExprRef old, ExprRef extra)> combine_fn);
     ExprRef CombineTileWithVerticalVector(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, const ExprRef& is_zero_mode, std::function<ExprRef(ExprRef old, ExprRef extra)> combine_fn);

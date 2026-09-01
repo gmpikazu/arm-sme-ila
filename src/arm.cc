@@ -18,15 +18,10 @@ namespace arm {
         Z_REG_COUNT(32),
         Z_ADDR_WIDTH(std::log2(Z_REG_COUNT)),
         Z_REG_WIDTH(SVL),
-        P_REG_COUNT(8),
+        P_REG_COUNT(16), // PDF Section E2.29 ResetSVEState iterates index [0, 15], hence 16 P-regs
         P_ADDR_WIDTH(std::log2(P_REG_COUNT)),
         P_REG_WIDTH(SVL_B),
-        DRAM_ADDR_WIDTH(128),
-
-        // TODO: these need more thought
-        // Tszh(m.NewBvInput("Tszh",)1);
-        // Tszl(m.NewBvInput("Tszl",)3);
-        // Size(m.NewBvInput("Size",)2);
+        DRAM_ADDR_WIDTH(BIG_DRAM_ADDR_WIDTH),
         
         // NOTE: verification states
         faults(m.NewBvState("faults", FAULTS_ADDR_WIDTH)), // increments at each fault
@@ -50,13 +45,16 @@ namespace arm {
         HV(m.NewBoolInput("HV")),
 
         // TODO: TBC: check each bit width
+        // some should only be limited to W12-W15
+        // but that depends on the instruction
         Rs(m.NewBvInput("Rs", GPR_ADDR_WIDTH)),
         Rv(m.NewBvInput("Rv", GPR_ADDR_WIDTH)),
         Rn(m.NewBvInput("Rn", GPR_ADDR_WIDTH)),
         Rm(m.NewBvInput("Rm", GPR_ADDR_WIDTH)),
         Rd(m.NewBvInput("Rd", GPR_ADDR_WIDTH)),
         
-        Imm(m.NewBvInput("Imm", 8)), // TODO: TBC: what is the maximum bits needed?
+        // ARM SME uses Imm1 to Imm8, max bits is 8
+        Imm(m.NewBvInput("Imm", 8)),
         Imm1(SelectBit(Imm, 0)), Imm2((Imm(1, 0))),
         Imm3(Imm(2, 0)), Imm4(Imm(3, 0)),
         Imm6(Imm(5, 0)), Imm8(Imm(7, 0)),
@@ -72,6 +70,7 @@ namespace arm {
         
         // NOTE: Sort Refs
         // ASK: bfloat and fp16 should have different format
+        // WARN: treated the same in UF
         bf16(SortRef::BV(16)),
         fp64(SortRef::BV(64)),
         fp32(SortRef::BV(32)),
@@ -87,14 +86,13 @@ namespace arm {
         fpneg32("fpneg32", fp32, fp32),
         fpneg16("fpneg16", fp16, fp16),
         bfneg16("bfneg16", bf16, bf16),
-        // TODO: TBC: check the argument sizes below
         fpmac64("fpmac64", fp64, {fp64, fp64, fp64}),
         fpmac32("fpmac32", fp32, {fp32, fp32, fp32}),
         fpdotadd32to32("fpdotadd32to32", fp32, {fp32, fp32, fp32, fp32, fp32}),
         fpdotadd16to32("fpdotadd16to32", fp32, {fp32, fp16, fp16, fp16, fp16}),
         bfdotadd16to32("bfdotadd16to32", fp32, {fp32, bf16, bf16, bf16, bf16}),
 
-        // NOTE: DRAM related (UF and MemState coexist, runtime bool selects which one)
+        // NOTE: DRAM related (UF and MemState coexist, config.h selects which one)
         DRAM_UF("DRAM UF", SortRef::BV(8), SortRef::BV(DRAM_ADDR_WIDTH)), // addr -> BYTE
         dram(m.NewMemState("DRAM", DRAM_ADDR_WIDTH, BYTE)),
         // to catch the address and value of DRAM writes
@@ -117,6 +115,23 @@ namespace arm {
         }
 
         AddInstructions();
+    }
+
+    void ArmSme::ResetSMEState(InstrRef& instr) {
+        auto new_za = za;
+        for (size_t i = 0; i < ZA_BYTE_SIZE; i++) {
+            new_za = _SetByte(new_za, BvConst(i, ZA_ADDR_WIDTH), BvConst(0, BYTE));
+        }
+        instr.SetUpdate(za, new_za);
+    }
+
+    void ArmSme::ResetSVEState(InstrRef& instr) {
+        for (size_t i = 0; i < Z_REG_COUNT; i++) {
+            instr.SetUpdate(z_regs[i], BvConst(0, Z_REG_WIDTH));
+        }
+        for (size_t i = 0; i < P_REG_COUNT; i++) {
+            instr.SetUpdate(p_regs[i], BvConst(0, P_REG_WIDTH));
+        }
     }
     
     ExprRef ArmSme::ToConstrainedTileIndex(const ExprRef& tile_idx, const NumericType& esize) {
@@ -297,19 +312,19 @@ namespace arm {
         return GetElementInVectorFromLSB(vector, mirrored_idx, element_size_bits);
     }
 
-    ExprRef ArmSme::IsAnyPredActive(const ExprRef& vector, const NumericType& element_size_bits) {
-        assert(vector.bit_width() == P_REG_WIDTH);
+    ExprRef ArmSme::IsAnyPredActive(const ExprRef& mask, const NumericType& element_size_bits) {
+        assert(mask.bit_width() == P_REG_WIDTH);
 
         NumericType elements = SVL / element_size_bits;
         assert(elements > 0);
-        ExprRef bit = GetPredBitFromLSB(vector, 0, element_size_bits);
+        ExprRef bit = GetPredBitFromLSB(mask, 0, element_size_bits);
         for (size_t i = 1; i < elements; i++) {
-            bit = (bit | GetPredBitFromLSB(vector, i, element_size_bits));
+            bit = (bit | GetPredBitFromLSB(mask, i, element_size_bits));
         }
         return bit;
     }
 
-    ExprRef ArmSme::GetPredBitFromLSB(const ExprRef& vector, const NumericType& idx, const NumericType& element_size_bits) {
+    ExprRef ArmSme::GetPredBitFromLSB(const ExprRef& mask, const NumericType& idx, const NumericType& element_size_bits) {
         /** source: https://support.arm.com/documentation/ddi0596/2021-06/Shared-Pseudocode/AArch64-Functions?lang=en
          *   bit ElemP[bits(N) pred, integer e, integer esize]
          *       integer n = e * (esize DIV 8);
@@ -318,20 +333,21 @@ namespace arm {
          */
         const NumericType actual_idx = idx * (element_size_bits / BYTE);
         assert(actual_idx >= 0 && actual_idx < P_REG_WIDTH);
-        return SelectBit(vector, actual_idx);
+        return SelectBit(mask, actual_idx);
     }
 
-    ExprRef ArmSme::GetPredBitFromLSB(const ExprRef& vector, const ExprRef& idx, const NumericType& element_size_bits) {
+    ExprRef ArmSme::GetPredBitFromLSB(const ExprRef& mask, const ExprRef& idx, const NumericType& element_size_bits) {
         const NumericType elements = SVL / element_size_bits;
         assert(elements > 0); // SVL must be greater than element_size_bits
 
-        assert(elements != 1); // ASK: temporary assert to prevent single element
-                                //loop works with single elem BUT log2(1) will fail
+        // edge case: return least significant bit
+        if (elements == 1) { return SelectBit(mask, 0); }
 
+        // log2(1) fails, hence edge case handled above
         assert(idx.bit_width() <= std::log2(elements)); // idx within bounds by bit-width constraint
-        ExprRef bit = GetPredBitFromLSB(vector, 0, element_size_bits);
+        ExprRef bit = GetPredBitFromLSB(mask, 0, element_size_bits);
         for (size_t i = 1; i < elements; i++) {
-            bit = Ite(idx == i, GetPredBitFromLSB(vector, i, element_size_bits), bit);
+            bit = Ite(idx == i, GetPredBitFromLSB(mask, i, element_size_bits), bit);
         }
         return bit;
     }
@@ -447,8 +463,8 @@ namespace arm {
         return ZExt(base_reg_value, TEMP_LARGEST_ADDR_WIDTH) + ZExt(imm, TEMP_LARGEST_ADDR_WIDTH);
     }
     
-    // NOTE: safe for source and dest to alias, since result is a new BvConst(0, vector_length_bits)
-    ExprRef ArmSme::MaskWithSinglePredicate(const ExprRef& source, const ExprRef& dest, const NumericType& element_size_bits, const NumericType& vector_length_bits, const ExprRef& predicate, bool is_zero_mode) {
+    // NOTE: safe for source and dest to alias, since result is a newly instantiated std::vector<ExprRef>
+    ExprRef ArmSme::MaskWithSinglePredicate(const ExprRef& source, const ExprRef& dest, const NumericType& element_size_bits, const NumericType& vector_length_bits, const ExprRef& mask, bool is_zero_mode) {
         if (source.bit_width() != dest.bit_width()) throw std::runtime_error("MaskWithSinglePredicate(): source and dest must have same bit-width");
         if (source.bit_width() != vector_length_bits) throw std::runtime_error("MaskWithSinglePredicate(): bit-width must equal vector_length_bits");
 
@@ -458,18 +474,13 @@ namespace arm {
         for (size_t i = 0; i < num_elements; i++){
             ExprRef source_element = GetElementInVectorFromLSB(source, i, element_size_bits);
             ExprRef dest_element = GetElementInVectorFromLSB(dest, i, element_size_bits);
-            ExprRef is_activated = (GetPredBitFromLSB(predicate, i, element_size_bits) != 0);
+            ExprRef is_activated = (GetPredBitFromLSB(mask, i, element_size_bits) != 0);
             elems.push_back(is_zero_mode ? Ite(is_activated, source_element, BvConst(0, element_size_bits)) : Ite(is_activated, source_element, dest_element)); // no push_front for std::vector, so use std::reverse afterwards
         }
         std::reverse(elems.begin(), elems.end()); // reverse since we wanted to fill from LSB to MSB
         return Concatenate(elems);
     }
 
-    // =====================================================================================
-    // TODO: hor/ver vector combine tile still does not do pre-extracting vector and predicate
-    // TODO: can remove zero mode Ite if not needed, but won't affect Z3 complexity that much
-    // =====================================================================================
-    
     ExprRef ArmSme::CombineTileWithHorizontalVector(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, const ExprRef& is_zero_mode, std::function<ExprRef(ExprRef a, ExprRef b)> combine_fn) {
         assert(row_pred.bit_width() == col_pred.bit_width());
         assert(row_pred.bit_width() == P_REG_WIDTH);
@@ -540,34 +551,10 @@ namespace arm {
     
     ExprRef ArmSme::IntegerCombineTileWithMatrices(const ExprRef& mem, const ExprRef& tile_idx, const ExprRef& vec1, const ExprRef& vec2, const ExprRef& row_pred, const ExprRef& col_pred, const NumericType& element_size_bits, bool sub_instead_of_add, bool op1_unsigned, bool op2_unsigned) {
 
-        #if 0 // TODO: pre-extract op1 op2
-        std::vector<ExprRef> vec1_ext;
-        std::vector<ExprRef> vec2_ext;
-        vec1_ext.reserve(total_sub);
-        vec2_ext.reserve(total_sub);
-        for (size_t i = 0; i < total_sub; ++i) {
-            auto e1 = GetElementInVectorFromLSB(vec1, i, sub_esize);
-            auto e2 = GetElementInVectorFromLSB(vec2, i, sub_esize);
-            vec1_ext.push_back(op1_unsigned ? ZExt(e1, element_size_bits) : SExt(e1, element_size_bits));
-            vec2_ext.push_back(op2_unsigned ? ZExt(e2, element_size_bits) : SExt(e2, element_size_bits));
-        }
-        #endif
-
         NumericType dim = Z_REG_WIDTH / element_size_bits;
         NumericType sub_esize = element_size_bits / 4;
         NumericType vec_num_sub_elem = SVL / sub_esize;
 
-        // NOTE: pre-extract the bits from predicate and vectors (since they are deeply nested Ite() trees)
-        // otherwise, Extract() will construct a whole new tree each time, now we simply reference existing trees
-        std::vector<ExprRef> row_bits;
-        row_bits.reserve(vec_num_sub_elem);
-        std::vector<ExprRef> col_bits;
-        col_bits.reserve(vec_num_sub_elem);
-        for (size_t i = 0; i < vec_num_sub_elem; i++) {
-            row_bits.push_back(GetPredBitFromLSB(row_pred, i, sub_esize));
-            col_bits.push_back(GetPredBitFromLSB(col_pred, i, sub_esize));
-        }
-        // processing using pre-extracted predicate bits
         std::vector<ExprRef> slices;
         slices.reserve(dim);
         for (size_t row = 0; row < dim; row++){
@@ -580,8 +567,9 @@ namespace arm {
                 auto delta = BvConst(0, element_size_bits); // newly-instantiated
                 // widening dot product (smaller bits into larger bits)
                 for (size_t k = 0; k < 4; k++){
-                    // ASK: note sure about predicates, ARM uses `ElemP[esize DIV 4]`
-                    auto activated = (row_bits[4*row+k] != 0) & (col_bits[4*col+k] != 0);
+                    // treat each input vector as a vector of `sub_esize`-sized elements
+                    // hence the number of predicates equals the number of `sub_esize`-sized elements
+                    auto activated = (GetPredBitFromLSB(row_pred, 4*row+k, sub_esize) != 0) & (GetPredBitFromLSB(col_pred, 4*col+k, sub_esize) != 0);
 
                     auto op1 = GetElementInVectorFromLSB(vec1, 4*row+k, sub_esize);
                     op1 = op1_unsigned ? ZExt(op1, element_size_bits) : SExt(op1, element_size_bits);

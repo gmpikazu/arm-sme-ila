@@ -1,91 +1,80 @@
-# Project Plan
-## TODO
-> STR test, SVE2 test, FP structural test (please don't timeout)
-- what is difference between `s.add(u.GetZ3Expr() == cstr)` and `u.AddStepPred() + u.Unroll`? and `s.Add(u.Equal(..))` constrain future `Load` using previous `Store` concretely first, before moving on to associative list in the unroller
+# Project Notes
+## Codebase Quirks
+**Modulo Responsibility:**
+- Some functions require the caller to perform modulo before calling (eg., `GetPredBitFromLSB`) and asserts that the parameters are within bounds
+- Other functions (eg., Typed Slice Helpers) perform the modulo internally, caller modulo is optional
+- Constraining the bit-width of an `ilang::ExprRef` naturally constrains the set of values it can possibly take
 
-## Report
-- How to compute `DotAdd` in infinite precision before rounding once realistically?
-- I hope that `z3::fma` has **single rounding** as I assume
-- Our Z3 (checking `/usr/include`) does not expose `substitute_funs` and even if we had it, the operation is quite basic
-    - Our need is to replace **every single** UF inside the `tr` with the corresponding body
-    - AI Agent suggested a recurisve walker implementation to traverse `tr` but I'm not sure what `tr` looks like
-        - I understand the substitution procedure but not the internal representation of `tr` for recursion
-- How to make DotAdd with Single Rounding, must perform arithmetic in a larger bit vector
-- `FPNeg`, `BFNeg` I can't find Pseudocode in the ARM SME PDF, but [online](https://support.arm.com/documentation/111108/2026-06/Shared-Pseudocode/shared-functions-float?lang=en) seems to include FP exceptions and FPCR, how detailed do we want to model? And what do we take as our guide?
-- `BFAdd`, `BFMul` also missing from PDF, sometimes BF can use `FPDot` (1 rounding) or chained `BFMul`, `BFAdd` (2 rounding)
-- We can make `Neg` and `FPDot` as the smallest unit of UF or not? Other functions handle exceptions and FPCR before calling UF... (see Zulip Question)
+**Unit Tests Assume a Certain SVL:**
+- Bit vector constraints are written using hexadecimal and only span up to a certain number of `SVL` bits
+- Only `REVD.Q` unit test uses 256-bit `SVL`, others expect 128-bit `SVL`
 
-## IMPORTANT
-- the tests now are a bit hardcoded assuming SVL=128, else it breaks
+**`Z_REG_WIDTH` and `SVL` are Equivalent:**
+- They are used interchangeably in the codebase but are the same value
+- Since a `Z` vector register, by definition, must be able to hold an entire `SVL`-bit vector
 
-#### My UFs DRAM Idea:
-1. `Write` updates DRAM `MemState` with `DRAM_ADDR_WIDTH` **and** `wb_svl_vector`, `wb_base_addr` for UFs
-2. `Read` either reads from DRAM `MemState` or UFs controlled by a boolean
-- maintain (1) SVL-bit write vector, (2) esize_bits, (3) base+offset that starts the write
-- then in testing, use Z3 to constrain step[i+1] UFs to produce results based on prev write **and** carry over the last couple writes that didnt get overwritten
-> This is NOT POSSIBLE, since we need to constrain everything BEFORE running `s.check()` but `u.GetZ3Expr` needs solver to already be done (JUST USE MEMSTATE??)
+**Floating Point UFs and Sort Refs:**
+- FP operations are modelled in the ILA as Uninterpreted Functions (`ilang::FuncRef`) where the bit vector inputs symbolizing IEEE bit vectors are `ilang::SortRef`s
+    - Since ILAng identifies `SortRef`s by their bit-width, BFloat16 and Half Precision (`fp16`) bit vectors will be treated as the same `SortRef` when the UFs are left uninterpreted
+- Through UF substitution, there is a way to turn those bit vectors into `Z3 FPA` expressions involving exponent bits and significand bits following IEEE standard, only in this case will BFloat16 be different from FP16
 
-## Crucial Clarification (in meeting)
-- loading/storing BYTE,..,QUAD has no alignment check? meaning we can read across cache lines?
+## ARM SME Quirks
+**`LD1`, `ST1` Performs Base Alignment Check for SP Only:**
+- If the base register is not `SP` then alignment is not checked, may access cache boundaries
+- `LDR`, `STR` instructions, on the other hand, **always** check their base address alignment to a multiple of the smallest `SVL_B` (ie., 16) so it always accesses an entire `SVL`-bit vector from an aligned base address
 
-## Remaining Tasks
-- Check ARM pseudocode for Floating Point blackbox instructions (similar to checking `ElemP[]` implementation)
-    - eg., neg_fn, fmac_fn, fdotadd_fn, etc
-- Optimize `K2` FP instructions using `delta` then `sum` pattern <!-- TODO: optimizations require checking the true ARM pseuducode to see whether we can split the logic into `delta` and `sum` -->
-- Check each instruction and their inputs for proper `SExt` or `ZExt`
-- Check `ExprRef` arithmetic, make sure they are extended before operation **to prevent truncation**
-- Test edge cases of `XZR`, `WZR` access and write
-- Verify instructions by constructing unit tests, then integration tests (eg., {ZERO, MOVA, SMOPA})
-## Differences From ARM SME Document
-> `BFDotAdd` should be a high level call that performs some logic before calling `FPDot` and `FPAdd`
-> `FPDotAdd_ZA`, `FPMulAdd_ZA` should do higher level logic (eg., FPCR) before calling `FPMulAdd`, `FPDot`
-> The lower level parts of `FPMulAdd`, `FPDot` can be IEEE function substitutions
-> `BFDotAdd` actually can call `BFMul`, `BFAdd` too which are IEEE function substitutions
-- FPCR (control registers) for floating point instructions and optional floating point exceptions are not modelled
-- Store instructions always write to memory regardless of `active` predicate, it's just that `inactive` elements are written exactly as they were initially in DRAM. ARM says `inactive` elements shouldn't write memory (but in this case the memory was updated to its initial value so does it matter?)
-- Instructions always execute the happy path while `faults` state is incremented when the fault condition is true so state changes still proceed even during fault
-    > `LD1` instructions don't check `ConstrainUnpredictableBool` before checking `SPAlignment`
-> No information on `REVD`'s `Reverse(element, swsize)` internal behavior (modelled by assumption instead)
-- A64 instructions like `MSR` and `SMSTART SM` aren't modelled completely down to each bit
-- `Ws`, `Wv` in ARM only selects registers `W12-W15`, but this ILA allows selecting any `W` register
-    - **Solution:** limit `Rs`, `Rv` to 2-bits and prepend `011` in `BasePlusOffset` function
-    - and make `Rs`, `Rv` two bits **NOT ALWAYS 2 bits** need to really check...
-- Size suffix decoding is the reponsibility of the caller who decides which instruction type (.B .H ..) to execute, the model's ILA behavior does not adjust its logic depending on a `size` `ExprRef` runtime variable:
-    - `SCLAMP`, `UCLAMP` have their `size` suffix (.B .H ..) embedded into the instruction type, hence the ILA behavior does not attempt to compute an `esize` `BvExpr` at runtime since the helper functions require concrete C++ integers
-    - `PSEL` runtime decoding of `i1:tszh:tszl` is left to the caller, the ILA behavior only limits the bit-width of the `Imm` field according to the `size` suffix (.B .H ..) embedded into the instruction type
-        - Replacing `i1:tszh:tszl` immediate extraction with immediates among `Imm1,Imm2,Imm3,Imm4` is valid because the freedom of choosing bits in the immediate is the same (constraining `tszh:tszl` for decode, doesn't constrain the range of immediates that can be used in `imm5<4:>` since `i1` is free)
-- The implemented ZA and DRAM is big endian. Though the model is self-consistent (and `PrintZa` still prints according to ARM SME convention), a byte dump between the model's ZA and ARM SME's will differ in endianness
-- TME not modelled for `STR`, `LDR`
+## ILA Differences Against ARM SME Document
+1. System-wide States
+    - `MSR` instruction skipped, ILA only includes relevant `SMSTART`, `SMSTOP` aliases that control bits used in other instructions (ie., `PSTATE.SM`, `PSTATE.ZA` for SVE Streaming Mode and ZA Tile Storage Activation)
+    - A compile-time constant `SVL` is used throughout and a separate `VL` is not defined
+    - Traps and exceptions levels are not modelled in the ILA, instructions **only** check `PSTATE.SM`, `PSTATE.ZA` for SVE Streaming Mode and ZA status (enabled or not), they ignore exceptions levels and other quirks
+    - The only exception modelled is `SP` alignment and `(base + offset)` address alignment in Load/Store instructions
+    - Additional features (eg., watchpoints, transactional memory extension) are not present in the ILA
+2. Endianness
+    - The implemented ZA and DRAM is big endian. Though the ILA is self-consistent (and `PrintZa` still prints according to ARM SME convention), a byte dump between the model's ZA and ARM SME's will differ in endianness
+3. Hardware Decoding Specifics
+    - Vector select register names, `Ws`, `Wv`, in ARM can only select registers `W12-W15`, but this ILA allows selecting any `W` register
+        - ARM hardware actually limits `Rs`, `Rv` fields to 2-bits and prepends `011` to the input
+        - Current unit tests forgot to consider only using `W12-W15` so future development should take care to use the correct register names
+    - Size decoding (`.B`, ..., `.Q`) is baked into the ILA instruction name, not something to reasoned internally before determining `element_size_bits`
+        - `SCLAMP`, `UCLAMP` has no size `T` input that gets decoded at runtime, sizes are in the name
+        - `PSEL` has no `tszh`, `tszl` input, but `imm`'s bit-width extraction still behaves as if it was extracted from `i1:tszh:tszl`
+            - Since `i1` is a free bit, `imm` takes the form of `Imm1` (for `.D`), `Imm2` (for `.S`), `Imm3` (for `.H`), and `Imm4` (for `.B`)
+4. SVE2 Instructions
+    - The PDF contains no information on `REVD`'s `Reverse(element, swsize)` internal behavior (assumed it swaps 64-bit halves since `swsize=64` is fixed)
+5. Load/Store Instructions
+    - Transactional Memory Extension (TME) not modelled for `STR`, `LDR`
+    - `LD1` instructions do not check `ConstrainUnpredictableBool` before checking `SPAlignment`
+    - Though ARM says `inactive` elements must not touch DRAM, store instructions always write `SVL` bits to DRAM regardless of each element's `active` predicate (due to `MemState` and `WB_svl_vector` coexisting)
+        - By first saving `old_dram_elem` and writing the original DRAM element if the source element is `inactive`, the ILA achieves the same effect as if the source element did not touch DRAM
+6. Floating Point Behavior
+    - Floating point exceptions and Floating Point Status Register (FPSR) are not implemented
+    - Floating Point Control Register (FPCR), used to alter FP/BF behavior, is not modelled in the ILA
+    - Extended BFloat16 Behaviors (EBF) is skipped, only standard behavior is modelled (see Section B3.1.2.3):
+        - BF operations **do not** flush denormalized inputs to zero according to `FPCR.FZ` control
+        - BF instructions **do not** perform fused two-way dot and add without intermediate rounding
+    - Additional FP behaviors in modifying ZA (eg., exceptions, default NaN values, rounding modes, flush) are skipped
+    - IEEE UF substitutions defined in `test_helpers.cc` attempts to stay true to ARM SME but has flaws:
+        - `*mac` functions use Z3's native Fused Multiply and Accumulate with no intermediate roundings
+        - `*dotadd` functions do not have a native Z3 way to skip intermediate roundings, both FP/BF `*dotadd` functions widen the inputs to 64 bits first and explicitly round at the very end (but this does not guarantee infinite precision whilst computing in 64 bits)
+        - ARM says that for `*dotadd`, BF standard behavior (without EBF) performs intermediate rounding while FP standard behavior computes without intermediate rounding, however, the ILA currently does not support avoiding intermediate rounding for FP `*dotadd` functions due to the lack of infinite precision floating point in Z3
+    - `BFAdd`, `BFMul` is not found in the ARM PDF but there are some clues in this [webpage](https://support.arm.com/documentation/111108/2026-06/Shared-Pseudocode/shared-functions-float?lang=en)
+    - Future work could make `BFDotAdd`, `FPDotAdd_ZA`, `FPMulAdd_ZA` into higher-level calls that orchestrate FPCR, FPSR, and additional FP/BF behavior logic before calling primitive UF substitutions that will peform IEEE computation
+
+---
+
 ## Delayed Simple Tasks
 - Not all instructions require Streaming SVE Mode, some only need ZA
-- Refactor unit tests to use the new `track_slice()` + `cstr_all_tracked_and_zero()` idiom
 - `SMSSTART/STOP` on/off zeroing behavior (B1.1.1 and E2 pseudocode of SM,ZA states)
-- Use `assert`s instead of `if` and `switch` for program invariants
-- Remove `merge` and `zero` mode `ExprRef` selection if Z3 takes too long
-- `Z_REG_WIDTH` and `SVL` scattered around code but they are same thing
-## Delayed Complex Tasks
-- Floating point IEEE behavior, maybe no need since we replaced FP with Uninterpreted Functions
-- Bfloat16 and Fp16 are treated as the same thing in ILAng because bit-widths are equal (not a problem at the moment)
-## Random Questions
-- Does ILAng use 2's complement natively for operator overloads?
-- How do I know if a comparison operator overload is signed or unsigned?
-## Hardcoded Things To Generalize Later
-- `PrintZa` prints 16x16 matrix
-    - Need check the alignement issue and make sure the printing is accurate for larger `SVL_B`
-- All unit tests constrain a 128-bit vector
-    - Need to create generalized `bv_ones(size)`, `bv_zeros(size)` that fills `size` bits with 1 or 0 respectively
-    - Also need `bv_sequence(size)` that fills `0x00`, ..., `0xff` up to `size` bits
+- `TEMP_LARGEST_ADDR_WIDTH` for `BaseRegPlusImm` should be what?
+
+---
 
 # Implementation Overview
-This document is aimed to provide viewers with an overview of the implementation specifics of this project
-
 ## Code Conventions
-- Widths and sizes are given in bits (eg., `SVL`, `BYTE`, `HALF`, `esize`)
-- `UpdateSingle`-prefixed functions perform `instr.SetUpdate()` internally so **does not** support updating multiple changes at once (use lower-level helpers instead)
-
-## Temporary Quirks
-- `BaseRegPlusImm` extends to `TEMP_LARGEST_ADDR_WIDTH` then the Tile Helpers perform modulo (other helpers perform modulo before calling other functions)
-- Modulo (constraining the input) is sometimes the responsibility of the caller and other times the callee
+- Widths and sizes are given in bits (eg., `SVL`, `BYTE`, `HALF`, `esize`) unless indicated otherwise
+- Helpers that take `InstrRef&` as an argument perform `instr.SetUpdate` internally and must be used cautiously (eg., calling multiple of them sequentially **may not** produce expected results)
+    - For example, `UpdateSingle`-prefixed functions **do not** support updating multiple state changes at once, stacking calls together will just make the solver `unsat` since future constraints clash with earlier ones
 
 ## DRAM Implementation
 - The current DRAM implementation involves both a `MemState` and Uninterpreted Function called `DRAM_UF`
@@ -101,6 +90,11 @@ This document is aimed to provide viewers with an overview of the implementation
     - `Write` optionally converts the data from ZA endianness to DRAM endianness
     - `wb_svl_vector` is read from MSB to LSB, starting from base address and going up to higher addresses
     - It also updates `wb_base_addr` which stores the DRAM `base_addr` of the SVL-bit write
+
+**Initial Motivation (unsuccessful but forward looking):**
+- `MemState` and `WB_svl_vec` coexist to potentially completely replace `MemState` with `DRAM_UF` and persist the stores to DRAM by capturing `WB_svl_vec` and using it to constrain `DRAM_UF` reads in the next step, based on the base address reflected in the current `WB_base_addr`
+- Tried maintaining a hashmap of previous DRAM `(addr, byte_val)` mapping and only updating the ones that were written to based on `WB_base_addr` and carrying over the unmodified ones but that would require knowing the concrete value of `WB_base_addr` before even calling `s.check()`
+- Also, UFs are not differentiated by steps, so constraining different values at different steps leads to `unsat`
 
 ## GPRs (X registers & W registers)
 - There are 31 GPRs in Base A64, X registers are 64-bit, W registers are 32-bit lower half of X registers
@@ -134,7 +128,7 @@ This document is aimed to provide viewers with an overview of the implementation
     3. For general vectors of `esize`-byte elements, `SVL / esize` predicate bits are needed to control all elements
 
 ## Instruction Unit Testing
-- Specify a vector of instructions to `UnrollPathConn()`
+- Specify a vector of instruction names to `UnrollPathConn(std::vector<std::string>)`
 - This unrolls transitions and constraints where:
     1. The conditions to make each particular instruction decode **is automatically generated**
     2. The instructions in the list run one after another forming a connected transition path
@@ -151,6 +145,7 @@ This document is aimed to provide viewers with an overview of the implementation
 
 ## Fault Checking
 - Faults are modeled with an additional `faults` state attached to the model that is incremented on each fault
+- Instructions always execute the happy path while `faults` is incremented whenever the error condition is triggered. Hence, state changes still proceed as if there were no errors, but `faults` clearly indicate errors
 - For `LDR`, `STR` instructions, misalignment is **always** treated as fault (though ARM says it's optional)
 - For `LD1`, `ST1` instructions, ARM says SP (stack pointer) misalignment is definitely a fault
 - The `CHECK()` function inspects the `faults` state at every step and fails if `faults > 0`
@@ -185,7 +180,7 @@ This document is aimed to provide viewers with an overview of the implementation
     +-------+-----------+------------------+
     ```
     - Z3's header defines `fpa_sort<16/32/64>` for FP16/32/64 sorts but it does not include BFloat16
-- BFloat16 negation converts `ilang::BV(16)` to `BFloat16_Sort = fpa_sort(8, 8)` then negates natively
+- BFloat16 negation just `XOR`s the most significant bit (following IEEE standard of sign bit)
 - BFloat16 widening to FP32 pads additional 16 zeroes to BF16's LSB side, since FP32's upper 16 bits is BFloat16
 
 **Z3 FPA Functions:**
@@ -200,9 +195,10 @@ This document is aimed to provide viewers with an overview of the implementation
 **Replacing Uninterpreted Functions in `tr` (constraints) Generated by `ilang::UnrollPathConn`:**
 - ARM SME model contains placeholder UFs (uninterpreted functions) for Floating Point operations
 - The constraints, `tr`, produced by `ilang::UnrollPathConn()` is a tree formed by `And()`-ing constraints together, where each application node (eg., UFs) contain children which are their own function arguments
-- By recursively traversing starting at the root, `substitute_funs_manual` replaces all Floating Point UF nodes with a concrete body, producing a modified version of `tr` free from placeholder UFs that goes into the solving stage
+- By recursively traversing starting at the root, `_recursive_substitute` replaces all Floating Point UF nodes with a concrete body, producing a modified version of `tr` free from placeholder UFs that goes into the solving stage
 - The implementation uses Memoization to avoid exponential time complexity, taking into account that Z3 refers to structurally-identical sub-trees as one thing; this unique identifier is used a key to an `std::unordered_map` cache
-- Steps to perform a substitution for a single application node:
+
+*Procedure Breakdown (to substitute a single application node):*
     1. Build a template body `B` that contains placeholder `hole[i]` leaves, which will be filled later on
         - Holes are created with `Z3_mk_bound(ctx, idx, SORT)` where a designated `idx` *label* is specified
     2. Gather the actual non-placeholder arguments of the UF into a `z3::expr_vector` called `args_vec`
@@ -210,8 +206,13 @@ This document is aimed to provide viewers with an overview of the implementation
         - `B.substitute(...)` maps each **positional-indexed** `f.args(i)` to the **label-indexed** `hole[i]`
     4. This new `z3::expr` is the new replaced node, doing this recurisvely replaces an entire sub-tree in `tr`
 
-# Z3 Timeout Cases and Solutions ( + Confusions marked with TODO:)
-Z3 timed out during `UnrollPathConn` in some cases, below lists the bottlenecks and patterns to address each
+---
+
+# Z3 Timeout Cases and Solutions
+- The unit tests (ie., the `CHECK` helper) **do not** utilize `ilang::UnrollMonoConn` since doing so unrolls the constraints of the entire model at once, potentially over several steps, which timeouts during unrolling or solving stage
+- Instead, `ilang::UnrollPathConn` was used, which only unrolls the constraints for a specific sequence of instructions and automatically sets the decodes before executing each instruction
+- Additionally, the tests **do not** set up decode conditions for the target instruction sequence since those constraints are auto-generated by `UnrollPathConn` (eg., setting `pstate_sm = true`, `pstate_za = true` before executing)
+- Even with a smaller AST from `ilang::UnrollPathConn`, Z3 still timed out in some cases, below lists the bottlenecks encountered throughout development and patterns implemented to address each problem
 
 ## `CombineTileWith*Vector()`: Storing to somewhere we are about to Load WITHIN the same loop
 - **problem:** future iterations need to reason whether their read slice was previously written in the past or not
@@ -241,13 +242,11 @@ ExprRef ArmSme::CombineTileWithHorizontalVector(...) {
 
 ## `IntegerCombineTileWithMatrices`: Innermost loop built an AST with many Load() nodes
 - **insight:** commenting out the `Ite(activated, sum + prod, sum)` fixed the timeout, but why?
-- **problems:** <!-- TODO: have not identified all the problems thoroughly, focusing on empirically working solution -->
+- **problems:**
     1. `sum` is a big AST of `Extract` operations on concatenated `Load` operations where `ZA`, being a `MemState`, is modelled as a functional array (ie., nested `Ite` tree of `Stores`, `addr`, etc)
     2. `sum@1 = Ite(activated, sum@0 + prod, sum@0)` builds an AST where left and right child depends on previous `sum`
-    3. `activated` is built from `Extract` operations on `row_pred`, `col_pred` which are also nested `Ite` trees of `p_regs[i]`. Similarly, `op1`, `op2` depend on `vec1`, `vec2` which are also nested `Ite` trees of `z_regs[i]`
 - **solutions (see current code):**
-    1. use `sum` sparingly, delegate the complex arithmetic to a newly-instantiated `BvConst(0, element_size_bits)`, that does not come with a big memory tree, and only combine them together at the very end
-    2. pre-extract both `op`s (extract Vector elements and `SExt` or `ZExt`) and predicate bits into an `std::vector` and inner loop only references those pre-extracting `ExprRef`s (optional) <!-- TODO: why does this matter? -->
+    1. use `sum` sparingly, delegate the complex arithmetic to a newly-instantiated `BvConst(0, element_size_bits)`, that does not come with a big memory tree, and only combine them together only at the very end
 ```cpp
 // PROBLEMATIC
 ExprRef ArmSme::IntegerCombineTileWithMatrices(...) {

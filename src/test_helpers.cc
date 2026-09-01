@@ -79,11 +79,7 @@ static inline z3::expr mk_bound_var(z3::context& ctx, unsigned idx, z3::sort con
 }
 
 // NOTE: must call this during CHECK() to replace UFs with IEEE Z3 Floating Point Theory
-// TODO: these ones not sure single rounding or double rounding, it depends on FPCR
-// need to find more granular function call to make into UF
-// fpdotadd32to32(acc,a0,b0,a1,b1) -> acc + a0*b0 + a1*b1 (fp64 should be single round)
-// fpdotadd16to32(acc,a0,b0,a1,b1) -> same, widening fp16->fp64 (single round or double)
-// bfdotadd16to32(acc,a0,b0,a1,b1) -> same, widening bf16->fp32->fp64 (single round or double)
+// TODO: dotadd functions still DO NOT escape intermediate roundings
 z3::expr substitute_fp_ufs(const z3::expr& ast_root, ilang::IlaZ3Unroller& u, ArmSme& sme, z3::context& ctx) {
     // default Round Nearest Even
     ctx.set_rounding_mode(z3::RNE);
@@ -187,6 +183,13 @@ z3::expr substitute_fp_ufs(const z3::expr& ast_root, ilang::IlaZ3Unroller& u, Ar
     }
     // bfdotadd16to32(acc, a0, a1, b0, b1) = acc + a0 * b0 + a1 * b1
     {
+        /*
+        * Source from PDF Section E2.2 BFDotAdd
+        * 13 if !HaveEBF16() || fpcr.EBF == '0' then // Standard BFloat16 behaviors
+        * 14    prod = BFAdd(BFMul(op1_a, op2_a), BFMul(op1_b, op2_b)); 
+        * 15    result = BFAdd(addend, prod);
+        * ASK: assuming EBF (extended bfloat16 behaviors) is not modelled
+        */
         z3::expr var_acc = mk_bound_var(ctx, 0, bv32);
         z3::expr var_a0  = mk_bound_var(ctx, 1, bv16);
         z3::expr var_a1  = mk_bound_var(ctx, 2, bv16);
@@ -225,9 +228,6 @@ void record_failure(const std::string& msg) {
     g_current_failures++;
 }
 
-// Helper to constrain an ILA state variable at a specific step
-// Call AFTER unrolling, adds constraint directly to solver
-// step defaults to step 0 (initial step)
 // Bool
 void cstr_step_bool(z3::solver &s, ilang::IlaZ3Unroller &u, z3::context &ctx, const ilang::ExprRef &ila_expr, bool value, int step) {
     auto expr = u.GetZ3Expr(ila_expr, step);
@@ -341,7 +341,7 @@ void PrintZa(z3::model &mdl, ilang::IlaZ3Unroller &u, ArmSme& sme, int step) {
     }
     std::cout << "─┐" << std::endl;
     int step_len = std::to_string(step).length();
-    int spaces = 16 * cell_width - 38 - step_len; // pad to align right border
+    int spaces = sme.SVL_B * cell_width - 38 - step_len; // pad to align right border
     std::cout << "│ ZA TILE MEMORY LAYOUT (16x16) - Step " << step << " ";
     std::cout << std::string(spaces, ' ') << "│" << std::endl;
     std::cout << "├";
@@ -510,16 +510,11 @@ void CHECK(const std::string& test_name, ArmSme& sme, const std::vector<std::str
     g_current_failures = 0;
 
     // print instruction pipeline (to ensure correct instruction was passed into std::vector)
-    std::cout << "  [INSTRUCTIONS] start --> ";
+    std::cout << "  [INSTRS] start --> ";
     for (size_t i = 0; i < instr_names.size(); i++) {
         std::cout << instr_names[i] << " --> ";
     }
     std::cout << "done" << std::endl;
-    if (sub_fn != nullptr) {
-        std::cout << "  [SUB] UF substitution: ENABLED (Z3 FPA IEEE-754 semantics)" << std::endl;
-    } else {
-        std::cout << "  [SUB] UF substitution: disabled (uninterpreted)" << std::endl;
-    }
 
     try {
         ilang::Ila m = sme.get();
@@ -544,23 +539,29 @@ void CHECK(const std::string& test_name, ArmSme& sme, const std::vector<std::str
         ilang::IlaZ3Unroller u(ctx);
         z3::solver s(ctx);
 
+        auto ms = [](auto a, auto b){ return (int)std::chrono::duration_cast<std::chrono::milliseconds>(b-a).count(); };
         using clk = std::chrono::high_resolution_clock;
-        auto t0 = clk::now();
 
         // unroll the instruction path FIRST
+        auto t_before_unroll = clk::now();
+        std::cout << "  [UNROLL] unrolling... ";
         auto tr = u.UnrollPathConn(instrs, 0);
+        auto t_after_unroll = clk::now();
+        std::cout << "DONE (took " << ms(t_before_unroll,t_after_unroll) << " ms)" << std::endl;
 
         // optionally replaces UFs with Z3 FPA expressions
-        auto t1 = clk::now();
-        if (sub_fn) {
+        if (sub_fn != nullptr) {
+            std::cout << "  [SUB UF] IEEE substitution... ";
+            auto t_before_sub = clk::now();
             tr = sub_fn(tr, u, sme, ctx);
+            auto t_after_sub = clk::now();
+            std::cout << "ENABLED (took " << ms(t_before_sub,t_after_sub) << " ms)" << std::endl;
         }
+        std::cout << "  [SUB UF] IEEE substitution disabled (uninterpreted)" << std::endl;
         s.add(tr);
-        auto t2 = clk::now();
 
         // call setup lambda to add constraints AFTER unrolling
         setup_fn(u, s, ctx);
-        auto t3 = clk::now();
 
         // NOTE: initialize sme.faults to zero before solving
         cstr_step(s, u, ctx, sme.faults, ctx.bv_val(0, sme.faults.bit_width()), 0); // step 0
@@ -571,21 +572,17 @@ void CHECK(const std::string& test_name, ArmSme& sme, const std::vector<std::str
         s.set(p);
         
         // solve
+        auto t_before_solve = clk::now();
+        std::cout << "  [SOLVER] solving... ";
         auto result = s.check();
-        auto t4 = clk::now();
-
-        auto ms = [](auto a, auto b){ return (int)std::chrono::duration_cast<std::chrono::milliseconds>(b-a).count(); };
-        std::cout << "  [TIME] unroll=" << ms(t0,t1);
-        if (sub_fn != nullptr) { std::cout << "ms  substitute=" << ms(t1,t2); }
-        std::cout << "ms  setup=" << ms(t2,t3) << "ms  solve=" << ms(t3,t4) << "ms" << std::endl;
+        auto t_after_solve = clk::now();
+        std::cout << "DONE (took " << ms(t_before_solve,t_after_solve) << " ms)" << std::endl;
 
         if (result == z3::sat) {
 
             // call verify lambda with the model
             auto mdl = s.get_model();
             verify_fn(mdl, u);
-            auto t4 = clk::now();
-            std::cout << "  [TIME] verify+print=" << ms(t3,t4) << "ms" << std::endl;
 
             // NOTE: ensure no fault occurred throughout execution pipeline
             std::cout << "--- CHECKING FOR FAULTS ---" << std::endl;
@@ -593,7 +590,7 @@ void CHECK(const std::string& test_name, ArmSme& sme, const std::vector<std::str
                 auto got = TO_STR(sme.faults, step, u, mdl);
                 auto expected = TO_STR(BvConst(0, sme.faults.bit_width()), step, u, mdl);
                 bool fault_found = (got != expected);
-                std::cout << "step: " << step << " faults: " << got << " " << std::endl;
+                std::cout << "  step: " << step << " faults: " << got << " " << std::endl;
                 if (fault_found) {
                     record_failure("FAULT OCCURRED!!!");
                 }

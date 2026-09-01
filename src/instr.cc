@@ -7,6 +7,11 @@ namespace arm {
 
     // NOTE: esize is BUILT-INTO the instruction using .B .H .S .D .Q suffixes
     void ArmSme::AddInstructions() {
+    // NOTE: read Section B1.1.1 Process State for System Register Behavior
+    // changing pstate_sm always resets SVE state
+    // SME state (ZA storage) only resets when pstate_za is flipped to 1 from initially 0
+    // TODO: no implementation of MSR yet, so this is just SMSTART, SMSTOP
+    // also some instructions require only either SM or ZA pstate to be present
         { // SMSTART
             InstrRef instr = m.NewInstr("SMSTART");
             auto decode = TEMP_DECODE;
@@ -14,6 +19,8 @@ namespace arm {
             instr.SetUpdate(pstate_sm, BoolConst(true));
             instr.SetUpdate(pstate_za, BoolConst(true));
             // TODO: zero out vector and predicate registers
+            ResetSVEState(instr); 
+            ResetSMEState(instr);
         }
         { // SMSTOP
             InstrRef instr = m.NewInstr("SMSTOP");
@@ -23,15 +30,14 @@ namespace arm {
             instr.SetUpdate(pstate_za, BoolConst(false));
             // TODO: zero out vector and predicate registers
             // TODO: changing pstate_ZA may zero out the ZA storage (read B1.1.1.2 PSTATE.ZA)
+            ResetSVEState(instr); // SME state (ZA storage) unchanged
         }
         
         // NOTE: instructions below requires Streaming SVE mode
+        // TODO: some only need SM or ZA
         ExprRef SME_ON = pstate_sm & pstate_za;
         #define constrained(tile_idx, esize) ToConstrainedTileIndex(tile_idx, esize)
         
-        // TODO: move the constrained() logic INTO the lambda itself, all instr below
-        // TODO: update the lambdas to use const reference instead
-        // ASK: since MOV is alias to MOVA, maybe no need to implement
         { // MOVA (tile to vector)
             auto f = [&](NumericType opcode, NumericType esize, std::string suffix, ExprRef tile_idx, ExprRef imm){
                 InstrRef instr = m.NewInstr("MOVA_T2V"+suffix);
@@ -48,7 +54,7 @@ namespace arm {
             f(TEMP_OPCODE, HALF, ".H", constrained(ZAn, HALF), Imm3);
             f(TEMP_OPCODE, WORD, ".S", constrained(ZAn, WORD), Imm2);
             f(TEMP_OPCODE, DOUBLE, ".D", constrained(ZAn, DOUBLE), Imm1);
-            f(TEMP_OPCODE, QUAD, ".Q", constrained(ZAn, QUAD), BvConst(0, 1));
+            f(TEMP_OPCODE, QUAD, ".Q", constrained(ZAn, QUAD), BvConst(0, 1)); // NOTE: fixed zero Imm
         }
         { // MOVA (vector to tile)
             auto f = [&](NumericType opcode, NumericType esize, std::string suffix, ExprRef tile_idx, ExprRef imm){
@@ -66,7 +72,7 @@ namespace arm {
             f(TEMP_OPCODE, HALF, ".H", constrained(ZAd, HALF), Imm3);
             f(TEMP_OPCODE, WORD, ".S", constrained(ZAd, WORD), Imm2);
             f(TEMP_OPCODE, DOUBLE, ".D", constrained(ZAd, DOUBLE), Imm1);
-            f(TEMP_OPCODE, QUAD, ".Q", constrained(ZAd, QUAD), BvConst(0, 1));
+            f(TEMP_OPCODE, QUAD, ".Q", constrained(ZAd, QUAD), BvConst(0, 1)); // NOTE: fixed zero Imm
         }
         { // ZERO
             InstrRef instr = m.NewInstr("ZERO");
@@ -327,7 +333,7 @@ namespace arm {
             f("PSEL.H", TEMP_OPCODE, HALF, Imm3);
             f("PSEL.S", TEMP_OPCODE, WORD, Imm2);
             f("PSEL.D", TEMP_OPCODE, DOUBLE, Imm1);
-            // no QUAD support
+            // NOTE: no QUAD support
         }
 
         { // REVD.Q
@@ -335,7 +341,8 @@ namespace arm {
             auto decode = SME_ON & (cmd == TEMP_OPCODE);
             instr.SetDecode(decode);
 
-            NumericType esize = 128, swsize = 64; // NOTE: fixed for QUAD only
+            // NOTE: esize, swsize fixed for QUAD elements (.Q) only
+            NumericType esize = 128, swsize = 64;
             NumericType elements = SVL / esize;
             auto mask = GetPredicateRegister(Pg);
             auto operand = GetVectorRegister(Zn);
@@ -398,12 +405,12 @@ namespace arm {
             f("SCLAMP", ".H", TEMP_OPCODE, HALF, true);
             f("SCLAMP", ".S", TEMP_OPCODE, WORD, true);
             f("SCLAMP", ".D", TEMP_OPCODE, DOUBLE, true);
-            // no QUAD support for signed
+            // NOTE: no QUAD support for signed
             f("UCLAMP", ".B", TEMP_OPCODE, BYTE, false);
             f("UCLAMP", ".H", TEMP_OPCODE, HALF, false);
             f("UCLAMP", ".S", TEMP_OPCODE, WORD, false);
             f("UCLAMP", ".D", TEMP_OPCODE, DOUBLE, false);
-            // no QUAD support for unsigned too
+            // NOTE: no QUAD support for unsigned too
         }
     }
     
