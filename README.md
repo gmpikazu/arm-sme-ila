@@ -1,5 +1,10 @@
-# Project Notes
-## Note on Unit Tests
+# ARM SME ILA
+Formal specification of the ARM Scalable Matrix Extension (SME) in ILAng. The model implements 50+ instructions covering ZA tile storage, predicate masking, DRAM state, and floating-point behavior. Verified by 33 unit tests using Z3 SMT constraints.
+
+---
+
+## Project Notes
+### Note on Unit Tests
 **Unit Test Expected Output:**
 - The expected outputs (seen in `EXPECT_TRUE`) of the unit tests **were not** taken from a simulated ARM SME program
 - They were designed to ensure the implemented ILA semantics matched the descriptions in the ARM SME PDF document
@@ -9,7 +14,7 @@
 - A notable example is `test/test_sve.cc` where `REVD.Q` is followed by a `MOVA_V2T` instruction, where `REVD.Q` uses the input states constrained at `step 0` to update the ILA in `step 1`, then `MOVA_V2T` uses the input states constrained at `step 1` to update the ILA in `step 2`, propagating the changes from `REVD.Q` in the earlier `step 1`
 - This can be scaled to a whole program as long as the required instructions are supported in the ILA
 
-## Codebase Quirks
+### Codebase Quirks
 **Modulo Responsibility:**
 - Some functions require the caller to perform modulo before calling (eg., `GetPredBitFromLSB`) and asserts that the parameters are within bounds
 - Other functions (eg., Typed Slice Helpers) perform the modulo internally, caller modulo is optional
@@ -28,12 +33,12 @@
     - Since ILAng identifies `SortRef`s by their bit-width, BFloat16 and Half Precision (`fp16`) bit vectors will be treated as the same `SortRef` when the UFs are left uninterpreted
 - Through UF substitution, there is a way to turn those bit vectors into `Z3 FPA` expressions involving exponent bits and significand bits following IEEE standard, only in this case will BFloat16 be different from FP16
 
-## ARM SME Quirks
+### ARM SME Quirks
 **`LD1`, `ST1` Performs Base Alignment Check for SP Only:**
 - If the base register is not `SP` then alignment is not checked, may access cache boundaries
 - `LDR`, `STR` instructions, on the other hand, **always** check their base address alignment to a multiple of the smallest `SVL_B` (ie., 16) so it always accesses an entire `SVL`-bit vector from an aligned base address
 
-## ILA Differences Against ARM SME Document
+### ILA Differences Against ARM SME Document
 1. System-wide States
     - Instructions assume SME and SVE extensions are both present since the decode uses `BoolConst(true)`
     - `MSR` instruction skipped, ILA only includes relevant `SMSTART`, `SMSTOP` aliases that control bits used in other instructions (ie., `PSTATE.SM`, `PSTATE.ZA` for SVE Streaming Mode and ZA Tile Storage Activation)
@@ -74,13 +79,13 @@
 
 ---
 
-# Implementation Overview
-## Code Conventions
+## Implementation Overview
+### Code Conventions
 - Widths and sizes are given in bits (eg., `SVL`, `BYTE`, `HALF`, `esize`) unless indicated otherwise
 - Helpers that take `InstrRef&` as an argument perform `instr.SetUpdate` internally and must be used cautiously (eg., calling multiple of them sequentially **may not** produce expected results)
     - For example, `UpdateSingle`-prefixed functions **do not** support updating multiple state changes at once, stacking calls together will just make the solver `unsat` since future constraints clash with earlier ones
 
-## DRAM Implementation
+### DRAM Implementation
 - The current DRAM implementation involves both a `MemState` and Uninterpreted Function called `DRAM_UF`
     - `USE_DRAM_MEMSTATE` global flag controls whether bytes are read from `DRAM_UF` or `MemState`
     - Whether `DRAM_UF` or `MemState` is used does not break `cstr_step` helpers for read constraints during testing
@@ -100,12 +105,12 @@
 - Tried maintaining a hashmap of previous DRAM `(addr, byte_val)` mapping and only updating the ones that were written to based on `WB_base_addr` and carrying over the unmodified ones but that would require knowing the concrete value of `WB_base_addr` before even calling `s.check()`
 - Also, UFs are not differentiated by steps, so constraining different values at different steps leads to `unsat`
 
-## GPRs (X registers & W registers)
+### GPRs (X registers & W registers)
 - There are 31 GPRs in Base A64, X registers are 64-bit, W registers are 32-bit lower half of X registers
 - `GPRs` array can be indexed up to `idx=30`, but ARM defines `idx=31` to be among `XZR`, `WZR`, `SP` (stack pointer)
 - `Get(64|32)BitGPR` helpers return the corresponding zero register (`XZR`, `WZR`) or stack `SP` depending on a `bool`
 
-## ZA Storage
+### ZA Storage
 **Representation:**
 - `SVL_B`x`SVL_B` matrix represented as a linear array of `BYTE`s
 - Smallest unit of data in ARM is `BYTE`
@@ -123,7 +128,7 @@
 - `GetElement` helper function `loads` adjacent `BYTE`s and concatenates them to form the output vector
 - `SetElement` helper function breaks the input vector into `BYTE`s and `stores` them into ZA memory byte-per-byte
 
-## Predicate Masking
+### Predicate Masking
 - ARM SME supports `/M` (merge mode), destination element is unmodified if source element is not activated by predicate bit, and `/Z` (zero mode), destination element is zeroed out instead when source element is not activated by predicate bit
 - Predicate registers contain `SVL_B` bits and `bit[i * (esize / BYTE)]` controls activation of `vector.elem[i]` where an element can occupy `esize` bits (eg., `BYTE`, `HALF`, etc)
 - The implementation extracts bits starting from LSB, where index `i` is multiplied by `(element_size_bits) / BYTE`, following ARM's convention in this [website](https://support.arm.com/documentation/ddi0596/2021-06/Shared-Pseudocode/AArch64-Functions?lang=en), this means:
@@ -131,7 +136,7 @@
     2. For a BYTE vector, `(esize / BYTE) = 1` so each predicate bit corresponds to exactly one byte of the BYTE vector
     3. For general vectors of `esize`-byte elements, `SVL / esize` predicate bits are needed to control all elements
 
-## Instruction Unit Testing
+### Instruction Unit Testing
 - Specify a vector of instruction names to `UnrollPathConn(std::vector<std::string>)`
 - This unrolls transitions and constraints where:
     1. The conditions to make each particular instruction decode **is automatically generated**
@@ -142,19 +147,19 @@
 **Amazing Tool: [IEEE-Hex-Binary Converter (fp16, ..., fp128)](https://numeral-systems.com/ieee-754-converter/)**:
 - For BFloat16 just use upper bits of FP32 (single precision)
 
-## Z3 Insights
+### Z3 Insights
 - Internal States can only change between steps if explicitly set in `instr.Update`
 - Input States **always** changes between steps
 - Solving (`s.check()`) is Z3's processs of filling the symbolic values with concrete ones to satisfy all `instr.Update` transition constraints and external constraints added by `cstr_step` helpers
 
-## Fault Checking
+### Fault Checking
 - Faults are modeled with an additional `faults` state attached to the model that is incremented on each fault
 - Instructions always execute the happy path while `faults` is incremented whenever the error condition is triggered. Hence, state changes still proceed as if there were no errors, but `faults` clearly indicate errors
 - For `LDR`, `STR` instructions, misalignment is **always** treated as fault (though ARM says it's optional)
 - For `LD1`, `ST1` instructions, ARM says SP (stack pointer) misalignment is definitely a fault
 - The `CHECK()` function inspects the `faults` state at every step and fails if `faults > 0`
 
-## Preventing Z3 Garbage Initialization
+### Preventing Z3 Garbage Initialization
 - Explicitly constrain all values (including those we do not care about) to prevent Z3 populating them with garbage
 - For ZA, this was **initially** done through `cstr_step_slice()` where all untouched addresses are explicitly set to `0x00` to clean up `PrintZa()`'s output for easier empirical verification (this helper **only supports** constraining **a single slice** due to immediately zeroing out everything else, use **new idiom below** for multiple constraints)
 - Later, the `track_slice()` and `cstr_all_tracked_and_zero()` idiom was introduced to track multiple slices with newer ones overwriting previous ones, then finally zeroing out remaining addresses that was not constrained
@@ -170,7 +175,7 @@
     cstr_all_tracked_and_zero(s, u, ctx, t, sme); // enforces the constraint and zeroes the rest
     ```
 
-## Z3 Floating Point Arithmetic
+### Z3 Floating Point Arithmetic
 [Z3 API Documentation](https://z3prover.github.io/api/html/classz3_1_1expr.html#aa460b1ef4dde33c6ff10fbae306dc6b8)
 [Z3 Source Definitions](https://z3prover.github.io/api/html/z3_09_09_8h_source.html#l04685)
 
@@ -212,13 +217,13 @@
 
 ---
 
-# Z3 Timeout Cases and Solutions
+## Z3 Timeout Cases and Solutions
 - The unit tests (ie., the `CHECK` helper) **do not** utilize `ilang::UnrollMonoConn` since doing so unrolls the constraints of the entire model at once, potentially over several steps, which timeouts during unrolling or solving stage
 - Instead, `ilang::UnrollPathConn` was used, which only unrolls the constraints for a specific sequence of instructions and automatically sets the decodes before executing each instruction
 - Additionally, the tests **do not** set up decode conditions for the target instruction sequence since those constraints are auto-generated by `UnrollPathConn` (eg., setting `pstate_sm = true`, `pstate_za = true` before executing)
 - Even with a smaller AST from `ilang::UnrollPathConn`, Z3 still timed out in some cases, below lists the bottlenecks encountered throughout development and patterns implemented to address each problem
 
-## `CombineTileWith*Vector()`: Storing to somewhere we are about to Load WITHIN the same loop
+### `CombineTileWith*Vector()`: Storing to somewhere we are about to Load WITHIN the same loop
 - **problem:** future iterations need to reason whether their read slice was previously written in the past or not
 - **solution (see current code):** first read from old `mem`, then update things, finally propagate changes to `new_mem`
 ```cpp
@@ -244,7 +249,7 @@ ExprRef ArmSme::CombineTileWithHorizontalVector(...) {
 }
 ```
 
-## `IntegerCombineTileWithMatrices`: Innermost loop built an AST with many Load() nodes
+### `IntegerCombineTileWithMatrices`: Innermost loop built an AST with many Load() nodes
 - **insight:** commenting out the `Ite(activated, sum + prod, sum)` fixed the timeout, but why?
 - **problems:**
     1. `sum` is a big AST of `Extract` operations on concatenated `Load` operations where `ZA`, being a `MemState`, is modelled as a functional array (ie., nested `Ite` tree of `Stores`, `addr`, etc)
@@ -282,7 +287,7 @@ ExprRef ArmSme::IntegerCombineTileWithMatrices(...) {
 }
 ```
 
-## `MaskWithSinglePredicate`: Each call to `SetElementInVector` inside a loop performs `Extract` and `Concat`, future `SetElementInVector` has to traverse nested `Extract`-`Concat` trees
+### `MaskWithSinglePredicate`: Each call to `SetElementInVector` inside a loop performs `Extract` and `Concat`, future `SetElementInVector` has to traverse nested `Extract`-`Concat` trees
 - **problem:** future iterations that call `SetElementInVector` performs `Extract` and `Concat` on a `BvExpr` that is already a compounded `Extract`-`Concat` tree. Even if this `BvExpr` was originally set to `BvConst(0, vector_length_bits)`, the operations compounded into a big AST expression
 - **solution (see current code):** store an `std::vector<ExprRef>` containing the elements of the new vector, then build it using `Concatenate(std::vector)` to get a `BvExpr` without deep trees
 - **note:** this bottleneck exists in multiple helper functions but Z3 timeout first appeared during `MaskWithSinglePredicate` on DRAM-related vectors (`CombineTileWith*Vector` and other helpers also have repeated `SetElementInVector` pattern but is not currently a major issue)
@@ -302,13 +307,20 @@ ExprRef ArmSme::MaskWithSinglePredicate(...) {
 }
 ```
 
-# Running the Project
-**Build and Run:**
+## Build and Run
+This project depends on ILAng as an external library. ILAng is not vendored into this repo.
+
+1. Install [ILAng](https://github.com/Bo-Yuan-Huang/ILAng.git)
+2. Clone this repo
+3. In the project root:
 ```bash
-mkdir -p build & cd build
-cmake ..  & cmake --build . -j$(nproc)
+mkdir -p build && cd build
+cmake ..
+cmake --build . -j$(nproc)
 ./main # run the executable named 'main'
 ```
+
+The executable runs the 33 unit tests and prints the results.
 
 **Sample Output of `main`:**
 (the state variables and instruction list shown here are collapsed for readability)
